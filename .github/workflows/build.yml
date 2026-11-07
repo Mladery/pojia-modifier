@@ -127,7 +127,7 @@ jobs:
                              encoding="utf-8", errors="replace", timeout=180)
           print("--version exit=%s stdout=%r" % (r.returncode, r.stdout.strip()))
           assert r.returncode == 0, "--version failed: %r" % (r.stderr,)
-          assert "CE" in r.stdout, "version output missing CE: %r" % (r.stdout,)
+          assert "pojia-modifier" in r.stdout, "version output missing binary name: %r" % (r.stdout,)
 
           # --help 会把目标列表拼出来，顺带确认注册表在冻结态也是完整的
           r2 = subprocess.run([exe, "--help"], capture_output=True, text=True,
@@ -171,7 +171,7 @@ jobs:
           test -f "$D/app/install.json" || { echo "没写 install.json"; exit 1; }
           VER=$("$D/app/$BIN_NAME" --version)
           echo "装好的版本：$VER"
-          case "$VER" in *CE*) ;; *) echo "--version 输出不对：$VER"; exit 1 ;; esac
+          case "$VER" in *pojia-modifier*) ;; *) echo "--version 输出不对：$VER"; exit 1 ;; esac
           "$D/app/$BIN_NAME" --uninstall --yes --quiet
           test ! -f "$D/app/$BIN_NAME" || { echo "卸载没删掉程序"; exit 1; }
           echo "安装 / 卸载冒烟通过"
@@ -289,7 +289,7 @@ jobs:
                              encoding="utf-8", errors="replace", timeout=180)
           print("--version exit=%s stdout=%r" % (r.returncode, r.stdout.strip()))
           assert r.returncode == 0, "--version failed: %r" % (r.stderr,)
-          assert "CE" in r.stdout
+          assert "pojia-modifier" in r.stdout, "version output missing binary name: %r" % (r.stdout,)
           r2 = subprocess.run([exe, "--help"], capture_output=True, text=True,
                               encoding="utf-8", errors="replace", timeout=180)
           assert r2.returncode == 0, "--help failed: %r" % (r2.stderr,)
@@ -379,7 +379,7 @@ jobs:
           $ver = (& "$tmp\pojia-modifier.exe" --version 2>&1) -join " "
           Write-Host "装好的版本：$ver"
           if ($LASTEXITCODE -ne 0) { throw "--version 失败" }
-          if ($ver -notmatch "CE") { throw "--version 输出不对：$ver" }
+          if ($ver -notmatch "pojia-modifier") { throw "--version 输出不对：$ver" }
 
           # 安装态判定：程序靠这条决定升级时下 setup 还是裸 exe。
           $key = "HKCU:\Software\Mladery\pojia-modifier"
@@ -479,7 +479,7 @@ jobs:
 
           VER=$("$D/app/$BIN_NAME" --version)
           echo "装好的版本：$VER"
-          case "$VER" in *CE*) ;; *) echo "--version 输出不对：$VER"; exit 1 ;; esac
+          case "$VER" in *pojia-modifier*) ;; *) echo "--version 输出不对：$VER"; exit 1 ;; esac
 
           # 升级一次：同一个包再跑一遍必须成功，且不丢数据。留个文件当探针。
           mkdir -p "$D/app/状态"
