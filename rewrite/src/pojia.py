@@ -5904,6 +5904,211 @@ def do_clean_spill(targets):
 
 
 # ---------------------------------------------------------------------------
+# 10.5 自更新（--update / --check-update）
+# ---------------------------------------------------------------------------
+#
+# 换的是正在跑的程序文件，所以必须交给子进程：主进程退出后，批处理/脚本才动手。
+# 下载一律先落 .part 再改名，校验不过就删掉，绝不留半成品。
+# 启动时那次检查**只提示不安装**——用户不该在不知情的时候被升级。
+
+UPDATE_REPO = "https://github.com/Mladery/pojia-ce"
+UPDATE_API = os.environ.get("POJIA_UPDATE_API") or \
+    "https://api.github.com/repos/Mladery/pojia-ce/releases/latest"
+UPDATE_CACHE = "_update.json"
+UPDATE_TTL = 86400
+
+
+def version_tuple(text):
+    hit = re.search(r"(\d+)\.(\d+)", str(text or ""))
+    return (int(hit.group(1)), int(hit.group(2))) if hit else (0, 0)
+
+
+def http_get(url, timeout=8):
+    """取一段字节。失败抛 OSError / ValueError，由调用方决定怎么报。"""
+    import urllib.request
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "%s/%s" % (VAULT_APP, VERSION), "Accept": "*/*"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read()
+
+
+def update_asset():
+    """当前平台该下哪个资产。装过就下安装器，绿色版就下单文件。"""
+    installed = bool(install_meta())
+    if IS_WIN:
+        return ("pojia-modifier-windows-x64-setup.exe" if installed
+                else "pojia-modifier-windows-x64.exe")
+    if IS_MAC:
+        try:
+            machine = os.uname().machine.lower()
+        except (AttributeError, OSError):
+            machine = ""
+        arch = "arm64" if machine in ("arm64", "aarch64") else "x64"
+        return "pojia-modifier-macos-" + arch + ("-installer.command" if installed else "")
+    return "pojia-modifier-linux-x64" + ("-installer.run" if installed else "")
+
+
+def update_check(timeout=8):
+    """-> (远端版本, {资产名: 下载地址}, 错误)。"""
+    try:
+        data = json.loads(http_get(UPDATE_API, timeout).decode("utf-8", "replace"))
+    except (OSError, ValueError) as exc:
+        return "", {}, str(exc)
+    ver = str(data.get("tag_name") or "").lstrip("vV").split("-")[0]
+    assets = {}
+    for item in data.get("assets") or []:
+        assets[str(item.get("name"))] = str(item.get("browser_download_url") or "")
+    return ver, assets, ""
+
+
+def update_download(assets, dst):
+    """下载 + 校验。-> (ok, 说明)。校验和表里有这个文件就必须对得上。"""
+    name = update_asset()
+    url = assets.get(name)
+    if not url:
+        return False, "这次发布里没有 %s" % name
+    try:
+        blob = http_get(url, timeout=180)
+    except (OSError, ValueError) as exc:
+        return False, "下载失败：%s" % exc
+    want = ""
+    if assets.get("SHA256SUMS.txt"):
+        try:
+            table = http_get(assets["SHA256SUMS.txt"], timeout=20).decode("utf-8", "replace")
+        except (OSError, ValueError):
+            table = ""
+        if table:
+            for line in table.splitlines():
+                parts = line.split()
+                if len(parts) == 2 and os.path.basename(parts[1].lstrip("*")) == name:
+                    want = parts[0].lower()
+                    break
+            if not want:
+                return False, "校验和表里没有 %s，不装" % name
+    got = hashlib.sha256(blob).hexdigest()
+    if want and got != want:
+        return False, "校验不符（发布方 %s…，本地 %s…）" % (want[:12], got[:12])
+    tmp = dst + ".part"
+    try:
+        with open(long_path(tmp), "wb") as fh:
+            fh.write(blob)
+        if not IS_WIN:
+            os.chmod(long_path(tmp), 0o755)
+        os.replace(long_path(tmp), long_path(dst))
+    except OSError as exc:
+        remove_file(tmp)
+        return False, "落盘失败：%s" % exc
+    return True, "%s（%d KB）" % (name, len(blob) // 1024)
+
+
+def _swap_script(lines, name):
+    """把一段批处理写到临时目录并跑起来（主进程退出后它才动手）。"""
+    folder = os.environ.get("TEMP") or os.environ.get("TMP") or "."
+    path = os.path.join(folder, name)
+    try:
+        with open(long_path(path), "w", encoding="mbcs", newline="\r\n") as fh:
+            fh.write("\r\n".join(lines) + "\r\n")
+    except (OSError, LookupError):
+        try:
+            with open(long_path(path), "w", encoding="utf-8", newline="\r\n") as fh:
+                fh.write("\r\n".join(lines) + "\r\n")
+        except OSError:
+            return ""
+    return path
+
+
+def update_install(new_path):
+    """换装。-> (ok, 说明)。源码运行时只报告不替换。"""
+    me = os.path.abspath(__file__)
+    if not getattr(sys, "frozen", False):
+        return False, "源码运行时只提示不替换，新版留着：%s" % new_path
+    if IS_WIN and install_meta():
+        exe = os.path.basename(me)
+        bat = _swap_script([
+            "@echo off",
+            "ping -n 4 127.0.0.1 >nul",
+            ":wait",
+            'tasklist /fi "imagename eq %s" 2>nul | find /i "%s" >nul' % (exe, exe),
+            "if not errorlevel 1 (ping -n 2 127.0.0.1 >nul & goto wait)",
+            'start /wait "" "%s" /S' % new_path,
+            'start "" "%s"' % me,
+            'del "%~f0"',
+        ], "_pojia_update.bat")
+        if not bat or not _run_detached(["cmd", "/c", bat]):
+            return False, "安排静默安装失败，请手动运行 %s" % new_path
+        return True, "已安排静默安装，本进程退出后自动升级并重启"
+    if IS_WIN:
+        bat = _swap_script([
+            "@echo off",
+            "ping -n 4 127.0.0.1 >nul",
+            ":wait",
+            'move /y "%s" "%s.old" >nul 2>&1' % (me, me),
+            "if errorlevel 1 (ping -n 2 127.0.0.1 >nul & goto wait)",
+            'move /y "%s" "%s" >nul' % (new_path, me),
+            'start "" "%s"' % me,
+            'del "%~f0"',
+        ], "_pojia_update.bat")
+        if not bat or not _run_detached(["cmd", "/c", bat]):
+            return False, "安排替换失败，请手动把 %s 覆盖到 %s" % (new_path, me)
+        return True, "已安排替换，本进程退出后自动换装并重启"
+    try:
+        os.replace(long_path(new_path), long_path(me))
+        return True, "已替换，重新运行就是新版"
+    except OSError as exc:
+        return False, "替换失败：%s" % exc
+
+
+def run_update(check_only=False):
+    ver, assets, err = update_check()
+    if err:
+        fail_msg("检查更新失败：%s" % err)
+        return 1
+    if not ver:
+        fail_msg("这次发布没读到版本号")
+        return 1
+    say("  最新发布：%s　当前：%s" % (ver, DISPLAY_VERSION))
+    if version_tuple(ver) <= version_tuple(VERSION):
+        say("  已是最新。")
+        return 0
+    if check_only:
+        say("  有新版本。升级：--update")
+        return 0
+    dst = os.path.join(STATE_DIR, "_update_" + update_asset())
+    ok, msg = update_download(assets, dst)
+    if not ok:
+        remove_file(dst)
+        fail_msg(msg)
+        return 1
+    say("  已下载 %s" % msg)
+    ok, msg = update_install(dst)
+    say("  %s" % msg)
+    return 0 if ok else 1
+
+
+def update_hint():
+    """启动时最多每 24 小时查一次。**只提示，不装。**"""
+    if os.environ.get("POJIA_NO_UPDATE_CHECK"):
+        return
+    path = state_path(UPDATE_CACHE)
+    ver = ""
+    data = load_json(path, {})
+    try:
+        if time.time() - float(data.get("t") or 0) < UPDATE_TTL:
+            ver = str(data.get("ver") or "")
+    except (TypeError, ValueError):
+        ver = ""
+    if not ver:
+        got, _assets, err = update_check(timeout=4)
+        if err:
+            return
+        ver = got
+        save_json(path, {"t": time.time(), "ver": ver})
+    if ver and version_tuple(ver) > version_tuple(VERSION):
+        say("  提示：有新版 %s（当前 %s）。升级用 --update；不想被提示就加 --no-update-check"
+            % (ver, DISPLAY_VERSION))
+
+
+# ---------------------------------------------------------------------------
 # 11. 菜单 / 图形界面
 # ---------------------------------------------------------------------------
 
@@ -6469,6 +6674,9 @@ def build_parser():
       help="接管 Git Bash：把 DSH 的 bash 工具切到 Git Bash（配合 --apply，或单独执行）")
     a("--no-git-bash", dest="git_bash", action="store_false",
       help="关掉 Git Bash 接管（DSH 回到 PowerShell）")
+    a("--check-update", dest="check_update", action="store_true", help="只检查更新，不安装")
+    a("--no-update-check", dest="no_update_check", action="store_true",
+      help="启动时不检查更新")
     a("--guard", dest="guard", nargs="?", const="status",
       choices=["install", "remove", "status"], help="运行时守卫：install / remove / status")
     a("--fetch-tools", dest="fetch_tools", nargs="?", const="", metavar="NAMES",
@@ -6577,6 +6785,8 @@ def main(argv=None):
         return do_persona_explain(ctx)
 
     if o.menu:
+        if not (o.quiet or o.no_update_check):
+            update_hint()
         return interactive_menu(ctx)
     if o.gui:
         return gui_main(ctx)
@@ -6602,9 +6812,10 @@ def main(argv=None):
         return do_uninstall(ctx, targets, bool(o.purge))
     if o.purge:
         return do_purge(ctx, targets)
+    if o.check_update:
+        return run_update(True)
     if o.update:
-        say("%s %s：当前已是最新（离线校验，不联网）。" % (APP, DISPLAY_VERSION))
-        return 0
+        return run_update(False)
     if o.mac_check is not None or o.resign:
         given = (o.mac_check or "").strip()
         return run_mac_check([given] if given else [], bool(o.resign))
@@ -6615,6 +6826,9 @@ def main(argv=None):
     if o.fetch_tools is not None:
         return do_fetch_tools(o.fetch_tools)
 
+    if not (o.quiet or o.no_update_check or o.apply or o.revert or o.restore
+            or o.purge or o.uninstall):
+        update_hint()
     return interactive_menu(ctx)
 
 
