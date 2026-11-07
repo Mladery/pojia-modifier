@@ -8,7 +8,11 @@
 编号 C1… 与 `docs/spec/` 里的不变量编号对应。
 """
 import os
+import re
+import subprocess
 import sys
+import threading
+import time
 
 import pytest
 
@@ -53,6 +57,48 @@ def test_c2_help_lists_every_switch(box):
     text = box.out(r)
     missing = [s for s in REQUIRED_SWITCHES if s not in text]
     assert not missing, "--help 里缺这些开关：%s" % missing
+
+
+URL_RE = re.compile(r"(http://127\.0\.0\.1:\d+/\?t=[A-Za-z0-9_\-]+)")
+
+
+def test_c2_no_args_opens_the_gui(box):
+    """零参数 = 双击，必须起图形界面并把地址打出来。
+
+    这条钉的是「双击之后有界面」这一件事本身：进菜单、直接退出、或者根本没把界面
+    文件带上，都算红。界面是独立文件，所以它同时钉住了「两个文件得待在一起」。
+    """
+    env = box.env()
+    env["POJIA_GUI_NO_OPEN"] = "1"          # 别在测试机上弹浏览器
+    proc = subprocess.Popen([sys.executable, box.prog], cwd=box.root, env=env,
+                            stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    lines = []
+
+    def _drain():
+        for raw in proc.stdout:
+            lines.append(raw.decode("utf-8", "replace"))
+
+    threading.Thread(target=_drain, daemon=True).start()
+    try:
+        deadline = time.time() + 120
+        url = ""
+        while time.time() < deadline:
+            for text in lines:
+                m = URL_RE.search(text)
+                if m:
+                    url = m.group(1)
+                    break
+            if url or proc.poll() is not None:
+                break
+            time.sleep(0.1)
+        assert url, "零参数启动没起界面（退出码 %r）：%s" % (proc.poll(), "".join(lines))
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            proc.kill()
 
 
 def test_c2_help_lists_every_target_dir_flag(box):

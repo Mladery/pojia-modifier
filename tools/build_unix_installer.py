@@ -3,7 +3,8 @@
 """把一个 onedir 产物打成 Linux / macOS 的自解压安装包。
 
 产物结构：`tools/installer.sh` 的正文 + 一行载荷标记 + 一份 tar.gz。
-装、升级、卸载的逻辑全在 installer.sh 里，这个脚本只负责往里灌版本号和载荷。
+装、升级、卸载的逻辑全在 installer.sh 里，这个脚本只负责把 `__APP__` / `__VERSION__`
+/ `__ASSET__` 三个占位符填掉、再把载荷接上去。
 
 为什么不做 .deb / .pkg：两者都是系统级安装，装到 /usr 或 /Applications，
 `--update` 每次都得提权，自动更新就废了。Windows 那边装 %LOCALAPPDATA%
@@ -110,9 +111,14 @@ def build(src, asset, out, version=""):
     # 必须从**最后**一次出现处切：模板里的 awk 也写着这个标记（`/^__...__$/`），
     # 用 split() 会从那一行切开，剩下的头部连引号都不闭合。
     head = head[:head.rfind(MARK)].rstrip("\n") + "\n"
-    head = head.replace("__VERSION__", ver).replace("__ASSET__", asset)
-    if "__VERSION__" in head or "__ASSET__" in head:
-        print("模板占位符没替换干净", file=sys.stderr)
+    # 程序名也灌进去，别让 installer.sh 自己写死一份：写死就会和这里的 APP 走岔，
+    # 装的时候去找一个载荷里不存在的目录，报「载荷里没有 xxx，包坏了」。
+    head = (head.replace("__APP__", APP)
+                .replace("__VERSION__", ver)
+                .replace("__ASSET__", asset))
+    left = [m for m in ("__APP__", "__VERSION__", "__ASSET__") if m in head]
+    if left:
+        print("模板占位符没替换干净：%s" % ", ".join(left), file=sys.stderr)
         return 1
 
     payload = make_payload(src)

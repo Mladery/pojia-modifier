@@ -11,7 +11,7 @@ choco/scoop 装的，用户本机可能压根没装。
 
 用法：
     python tools/build_installer.py --src build/dist-onedir/pojia-modifier
-    python tools/build_installer.py --src build/dist-onedir/pojia-modifier --version 8.63
+    python tools/build_installer.py --src build/dist-onedir/pojia-modifier --version 1.0
 """
 
 import argparse

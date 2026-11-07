@@ -6,8 +6,8 @@
 `--add-data`、或者 runpy 那条路走不通，`--version` 和 `--status` 全都照样绿 —— 只有
 真的把界面拉起来才会暴露。CI 的冒烟步骤调它。
 
-**故意不带参数**：零参数（= 双击）就是用户默认走的那条路。界面起不来的话程序会
-退回命令行菜单，菜单读 stdin 拿到 EOF 就退出，于是这里拿不到地址、直接失败 ——
+**故意不带参数**：零参数（= 双击）就是用户默认走的那条路，它和 `--gui` 是同一条
+路径。界面文件没打进包、或者 runpy 那条路走不通，这里拿不到地址就直接失败 ——
 比只测 `--gui` 更贴近真实。
 
 用法：
@@ -25,8 +25,15 @@ import urllib.request
 URL_RE = re.compile(r"(http://127\.0\.0\.1:\d+/\?t=[A-Za-z0-9_\-]+)")
 
 
-def fail(msg):
+def fail(msg, seen=()):
     print("GUI smoke FAIL: " + msg)
+    if seen:
+        # 把产物自己说的话带出来：只报「没等到地址」的话，得回 CI 翻整份日志才知道
+        # 是崩了、是没打包、还是卡在哪一步。
+        print("--- 产物输出（末 %d 行）---" % len(seen))
+        for line in seen:
+            print("  | " + line)
+        print("---")
     return 1
 
 
@@ -44,6 +51,7 @@ def main():
                             stdin=subprocess.DEVNULL,      # 万一退回菜单，别卡在 input()
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     url = None
+    seen = []
     try:
         deadline = time.time() + 180        # 单文件包要先解包，给足时间
         while time.time() < deadline:
@@ -51,12 +59,14 @@ def main():
             if not line:
                 break
             text = line.decode("utf-8", "replace").rstrip()
+            seen = (seen + [text])[-20:]
             m = URL_RE.search(text)
             if m:
                 url = m.group(1)
                 break
         if not url:
-            return fail("没等到界面地址（零参数启动没进界面，或者包里没带 pojia_gui.py）")
+            return fail("没等到界面地址（零参数启动没进界面，或者包里没带 pojia_gui.py）",
+                        seen)
 
         html = urllib.request.urlopen(url, timeout=60).read().decode("utf-8", "replace")
         if "破甲修改器" not in html:
@@ -76,7 +86,7 @@ def main():
         print("GUI smoke OK")
         return 0
     except Exception as e:
-        return fail("%s: %s" % (type(e).__name__, e))
+        return fail("%s: %s" % (type(e).__name__, e), seen)
     finally:
         try:
             proc.terminate()

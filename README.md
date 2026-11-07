@@ -84,7 +84,8 @@ python src/pojia.py --check-update       # 只查有没有新版（只读，不�
 python src/pojia.py --update             # 有新版就下、校验、替换
 python src/pojia.py --no-update-check    # 这次启动别查更新
 python src/pojia.py --fetch-tools        # 下 busybox / Everything 到用户目录
-python src/pojia_gui.py                  # 图形界面（本机网页）
+python src/pojia.py                      # 不带参数 = 直接进图形界面（同 --gui）
+python src/pojia_gui.py                  # 只起图形界面（本机网页）
 ```
 
 **先 `--dry-run`，再动手。** 所有路径都可以用 `--<目标>-dir` 手动指定，记不住就跑 `--pick <目标>` 弹窗选。

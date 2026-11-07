@@ -1,6 +1,6 @@
 ﻿; 破甲修改器 —— Windows 安装程序（NSIS 3）
 ;
-; 拿 onedir 产物打一个 setup.exe：解到 %LOCALAPPDATA%\Programs\pojia-ce，
+; 拿 onedir 产物打一个 setup.exe：解到 %LOCALAPPDATA%\Programs\pojia-modifier，
 ; 建开始菜单项、登记卸载项、可选桌面图标和 PATH。
 ;
 ; 同一个 setup 既是安装器也是升级器：第二次运行读到 HKCU 里的 InstallDir，就
@@ -15,8 +15,8 @@
 ; 装完目录可写 —— 这样 --update 的换装脚本能直接覆盖，不必再提一次权。
 ;
 ; 编译（由 tools/build_installer.py 调用）：
-;   makensis /DVERSION=8.63 /DSRCDIR=build\dist-onedir\pojia-ce \
-;            /DOUTFILE=out\pojia-ce-windows-x64-setup.exe tools\installer.nsi
+;   makensis /DVERSION=1.0 /DSRCDIR=build\dist-onedir\pojia-modifier \
+;            /DOUTFILE=out\pojia-modifier-windows-x64-setup.exe tools\installer.nsi
 
 Unicode true
 SetCompressor /SOLID lzma
@@ -37,19 +37,19 @@ ${UnStrRep}
   !define VERSION "0.0"
 !endif
 !ifndef SRCDIR
-  !define SRCDIR "build\dist-onedir\pojia-ce"
+  !define SRCDIR "build\dist-onedir\pojia-modifier"
 !endif
 !ifndef OUTFILE
-  !define OUTFILE "out\pojia-ce-windows-x64-setup.exe"
+  !define OUTFILE "out\pojia-modifier-windows-x64-setup.exe"
 !endif
 
 !define APP_NAME      "破甲修改器"
-!define APP_ID        "pojia-ce"
-!define APP_EXE       "pojia-ce.exe"
+!define APP_ID        "pojia-modifier"
+!define APP_EXE       "pojia-modifier.exe"
 !define APP_PUBLISHER "Mladery"
-!define APP_URL       "https://github.com/Mladery/pojia-ce"
-!define APP_KEY       "Software\Mladery\pojia-ce"
-!define UNINST_KEY    "Software\Microsoft\Windows\CurrentVersion\Uninstall\pojia-ce"
+!define APP_URL       "https://github.com/Mladery/pojia-modifier"
+!define APP_KEY       "Software\Mladery\pojia-modifier"
+!define UNINST_KEY    "Software\Microsoft\Windows\CurrentVersion\Uninstall\pojia-modifier"
 
 Name "${APP_NAME}"
 OutFile "${OUTFILE}"
@@ -60,7 +60,7 @@ BrandingText "${APP_NAME} ${VERSION}"
 ShowInstDetails show
 ShowUninstDetails show
 
-; NSIS 要求四段 X.X.X.X。VERSION 是 "8.63"，补两个 0 就是 8.63.0.0。
+; NSIS 要求四段 X.X.X.X。VERSION 是 "1.0"，补两个 0 就是 1.0.0.0。
 VIProductVersion "${VERSION}.0.0"
 VIAddVersionKey "ProductName"      "${APP_NAME}"
 VIAddVersionKey "FileDescription"  "${APP_NAME} 安装程序"

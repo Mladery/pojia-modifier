@@ -16,6 +16,7 @@ import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CORE = os.path.join(ROOT, "src", "pojia.py")
+GUI = os.path.join(ROOT, "src", "pojia_gui.py")
 
 # 子进程只拿到这几项，其余一概不给。目的是切断任何"读到本机真实配置"的可能。
 _PASS_ENV = ("PATH", "SystemRoot", "SystemDrive", "COMSPEC", "PATHEXT",
@@ -39,6 +40,10 @@ class Box(object):
         os.makedirs(self.prog_dir)
         self.prog = os.path.join(self.prog_dir, "pojia.py")
         shutil.copy2(CORE, self.prog)
+        # 界面是单独一个文件（打包时当数据文件塞进包里）。两个文件必须待在一起，
+        # 否则零参数启动找不到界面 —— 沙箱要跟真实安装形态一致，所以一并拷。
+        if os.path.isfile(GUI):
+            shutil.copy2(GUI, os.path.join(self.prog_dir, "pojia_gui.py"))
         self.home = self._dir("home")
         self.appdata = self._dir("appdata")
         self.local = self._dir("local")

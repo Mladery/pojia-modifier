@@ -1,18 +1,18 @@
 #!/bin/sh
-# pojia-ce 安装器（Linux / macOS）
+# __APP__ 安装器（Linux / macOS）
 #
 # 一个文件干三件事：装、升级、卸载。头部是这段脚本，尾部贴着一份 tar.gz 载荷
 # —— 所以下载页上只有一个文件，不用先猜哪个能用。
 #
-#   ./pojia-ce-linux-x64-installer.run               交互安装（双击 / 直接跑）
-#   ./pojia-ce-linux-x64-installer.run --yes         不问，直接装（升级走的就是这条）
-#   ./pojia-ce-linux-x64-installer.run --uninstall   卸载
-#   ./pojia-ce-linux-x64-installer.run --prefix DIR  换安装目录
+#   ./__APP__-linux-x64-installer.run 交互安装（双击 / 直接跑）
+#   ./__APP__-linux-x64-installer.run --yes 不问，直接装（升级走的就是这条）
+#   ./__APP__-linux-x64-installer.run --uninstall 卸载
+#   ./__APP__-linux-x64-installer.run --prefix DIR 换安装目录
 #
 # 装到用户目录而不是 /usr/local：装到系统目录的话，--update 每次都得提权，
 # 自动更新就废了。Windows 那边装 %LOCALAPPDATA% 也是这个道理。
 
-APP=pojia-ce
+APP="__APP__"
 APP_NAME=破甲修改器
 VERSION="__VERSION__"
 ASSET="__ASSET__"
@@ -28,17 +28,17 @@ PURGE=0
 
 # 变量后面紧跟中文时必须写 ${VAR}：macOS 的 /bin/sh 是 bash 3.2，它在 UTF-8 里
 # 扫变量名会多吃掉后面那个字的首字节，`$PREFIX」` 被当成变量 `PREFIX<0xE3>`，
-# 未定义 → 整个值变空，剩下的字节还会解码失败。v8.65 的 macOS CI 就是这么炸的。
+# 未定义 → 整个值变空，剩下的字节还会解码失败，装到一半就报一堆乱码。
 say() { [ "$QUIET" = 1 ] || printf '%s\n' "$*"; }
 die() { printf '%s\n' "$*" >&2; exit 1; }
 
 usage() {
   cat <<'EOF'
-pojia-ce 安装器
+__APP__ 安装器
 
   --yes, -y          不问，全用默认值
   --quiet, -q        少说话
-  --prefix DIR       安装目录（默认 ~/.local/share/pojia-ce）
+  --prefix DIR       安装目录（默认 ~/.local/share/__APP__）
   --uninstall        卸载
   --revert           卸载前先把已改的提示词还原
   --purge            卸载时连 状态/ 和 历史备份/ 一起删
@@ -46,8 +46,8 @@ pojia-ce 安装器
   --no-path          不碰 shell 配置
   --help, -h         这一屏
 
-装好之后：pojia-ce        进图形界面
-          pojia-ce --menu 命令行菜单
+装好之后：直接敲 __APP__ 进图形界面
+          加 --menu 进命令行菜单
 EOF
 }
 
@@ -138,7 +138,7 @@ if [ -d "$PREFIX" ] && [ ! -f "$PREFIX/install.json" ]; then
     [ -e "$p" ] || continue
     case "$(basename "$p")" in
       状态|历史备份|人格库|skills|备份|persona.md|my-prompt.txt|破甲日志.txt) ;;
-      extra-targets.txt|pojia-ce|提示词快照-*) ;;
+      extra-targets.txt|__APP__|提示词快照-*) ;;
       *) die "$PREFIX 里有本程序不认识的东西（$(basename "$p")），不覆盖。换一个 --prefix。" ;;
     esac
   done
@@ -229,9 +229,9 @@ if [ "$WANT_PATH" = 1 ]; then
     bash) RC="$HOME/.bashrc" ;;
     *)    RC="$HOME/.profile" ;;
   esac
-  if ! grep -q "pojia-ce PATH" "$RC" 2>/dev/null; then
+  if ! grep -q "__APP__ PATH" "$RC" 2>/dev/null; then
     {
-      printf '\n# pojia-ce PATH\n'
+      printf '\n# __APP__ PATH\n'
       printf 'case ":$PATH:" in *":%s:"*) ;; *) export PATH="%s:$PATH" ;; esac\n' \
              "$BIN_DIR" "$BIN_DIR"
     } >> "$RC" 2>/dev/null && say "  已写进 ${RC}（重开终端生效）"

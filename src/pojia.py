@@ -182,6 +182,27 @@ def _emit(text, stream=None):
         pass
 
 
+def _harden_stdio():
+    """把输出流设成「编不出来的字换成占位符」，而不是抛异常。
+
+    为什么必须做：`--help` 是 argparse 自己往 sys.stdout 写的，绕开了 _emit 的兜底。
+    在英文 Windows 上（控制台代码页 1252）帮助文本里的中文会让它抛
+    UnicodeEncodeError，于是 `--help` 直接崩 —— 输出被重定向到文件或管道时也是
+    一样，编码跟着 locale 走而不是跟着控制台。
+
+    只放宽错误策略，不动编码本身：中文控制台照常显示中文，英文控制台显示「?」，
+    两种都不会中断。
+    """
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name, None)
+        if stream is None:
+            continue
+        try:
+            stream.reconfigure(errors="replace")
+        except Exception:
+            pass
+
+
 def say(text=""):
     if not OPT["quiet"]:
         _emit(text)
@@ -6573,44 +6594,55 @@ def pick_targets(ctx):
     return out
 
 
+def _gui_script():
+    """找界面脚本。
+
+    打包态它是当数据文件塞进包里的（tools/build_exe.py 的 --add-data），解包后躺在
+    sys._MEIPASS 根下；源码态就在 pojia.py 旁边。两处都找一遍，谁在就用谁。
+    """
+    cands = []
+    meipass = getattr(sys, "_MEIPASS", "") or ""
+    if meipass:
+        cands.append(os.path.join(meipass, "pojia_gui.py"))
+    here = os.path.dirname(os.path.abspath(__file__))
+    cands.append(os.path.join(here, "pojia_gui.py"))
+    for path in cands:
+        if os.path.isfile(path):
+            return path
+    return ""
+
+
 def gui_main(ctx):
+    """进图形界面：起一个只绑 127.0.0.1 的网页界面，在本进程里跑它。
+
+    为什么是「在本进程里跑」而不是再拉一个 python：打包版里没有解释器。界面脚本
+    自己会判断冻结态（sys.frozen），把每次按钮动作转成对**本 exe** 的命令行调用。
+
+    ctx 在这里用不上：界面不共用这份上下文，它按页面上的勾选重新解析目标，每个
+    动作都是独立的一次命令行调用 —— 这样「界面看到的」和「命令行跑出来的」永远
+    是同一条路。
+
+    找不到界面文件说明包是残的（--add-data 漏了，或者只拷了 pojia.py 一个文件）。
+    这时候别退回命令行菜单 —— 用户是双击进来的，给他一个要敲数字的菜单等于没界面，
+    直接说清楚怎么修。
+    """
+    script = _gui_script()
+    if not script:
+        fail_msg("找不到界面文件 pojia_gui.py（这个包不完整，请重新下载）")
+        return 1
+    folder = os.path.dirname(script)
+    if folder not in sys.path:
+        sys.path.insert(0, folder)
+    import runpy
+    argv_back = sys.argv
+    sys.argv = [script]
     try:
-        import tkinter
-        from tkinter import ttk
-    except ImportError:
-        warn("这台机器没有 tkinter，退回命令行菜单")
-        return interactive_menu(ctx)
-    root = tkinter.Tk()
-    root.title("%s %s" % (APP, DISPLAY_VERSION))
-    root.geometry("720x460")
-    frame = ttk.Frame(root, padding=10)
-    frame.pack(fill="both", expand=True)
-    ttk.Label(frame, text="选择目标（可多选）").pack(anchor="w")
-    box = tkinter.Listbox(frame, selectmode="multiple", height=14)
-    for t in TARGETS:
-        box.insert("end", "%-12s %-22s %s" % (t.key, t.name, _target_line(t, ctx)))
-    box.pack(fill="both", expand=True, pady=6)
-    out = tkinter.Text(frame, height=8)
-    out.pack(fill="both", expand=True)
-
-    def run(action):
-        sel = [TARGETS[i] for i in box.curselection()] or TARGETS
-        if action == "apply":
-            code = do_apply(ctx, sel)
-        elif action == "revert":
-            code = do_revert(ctx, sel)
-        elif action == "check":
-            code = do_check(ctx, sel)
-        else:
-            code = do_status(ctx, sel)
-        out.insert("end", "\n完成，退出码 %d\n" % code)
-
-    bar = ttk.Frame(frame)
-    bar.pack(fill="x")
-    for label, act in (("注入", "apply"), ("撤回", "revert"), ("体检", "check"), ("状态", "status")):
-        ttk.Button(bar, text=label, command=lambda a=act: run(a)).pack(side="left", padx=4)
-    ttk.Button(bar, text="关闭", command=root.destroy).pack(side="right", padx=4)
-    root.mainloop()
+        runpy.run_path(script, run_name="__main__")
+    except SystemExit as exc:
+        code = exc.code
+        return code if isinstance(code, int) else 0
+    finally:
+        sys.argv = argv_back
     return 0
 
 
@@ -6986,7 +7018,7 @@ def build_parser():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="%s %s —— 给本机 AI 客户端批量注入操作者人格，并可整块撤回。"
                     % (DISPLAY_NAME, DISPLAY_VERSION),
-        epilog="无参数启动进入交互菜单；--help 查看全部开关。",
+        epilog="无参数启动进入图形界面；--menu 进命令行菜单，--help 查看全部开关。",
     )
     a = p.add_argument
     a("--apply", action="store_true", help="注入")
@@ -7079,7 +7111,7 @@ def build_parser():
     a("--fetch-tools", dest="fetch_tools", nargs="?", const="", metavar="NAMES",
       help="下载外部工具（busybox64.exe / es.exe / Everything64.dll）到用户目录，不传就全要")
     a("--menu", action="store_true", help="进入交互菜单")
-    a("--gui", action="store_true", help="进入图形界面")
+    a("--gui", action="store_true", help="进入图形界面（本机网页；不带参数启动就是它）")
     a("--version", action="store_true", help="显示版本")
     return p
 
@@ -7108,9 +7140,11 @@ def resolve_targets(spec_list):
 
 
 def main(argv=None):
+    _harden_stdio()
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv:
-        argv = ["--menu"]
+        # 零参数 = 双击进来的，直接进界面。命令行菜单留着，敲 --menu 才进。
+        argv = ["--gui"]
     parser = build_parser()
     try:
         o = parser.parse_args(argv)
