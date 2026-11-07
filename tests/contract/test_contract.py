@@ -224,6 +224,63 @@ def test_disk_markers_are_stable(box):
         assert mark in blob, "磁盘标记变了：%r 不在文件里" % mark
 
 
+# ------------------------------------------------------------ C13 哈希标记
+
+def test_c13_hash_marker_uses_legacy_prefix(box):
+    """前缀 `pjm:h=` 是磁盘兼容契约，换一个就读不出老机器上的哈希。"""
+    d, path = _claude(box)
+    box.run("--target", "claude", "--claude-dir", d, "--apply", "--yes")
+    blob = open(path, encoding="utf-8").read()
+    assert "pjm:h=" in blob, "哈希标记前缀不是 pjm:h=，老机器上的状态会判错"
+
+
+# ------------------------------------------------------------ C14 镜像层
+
+def test_c14_apply_writes_and_revert_removes_mirror(box):
+    """主块被客户端过滤掉时，镜像层是唯一的第二重保险。"""
+    d, path = _claude(box)
+    r = box.run("--target", "claude", "--claude-dir", d, "--apply", "--yes")
+    assert r.returncode == 0, box.out(r)
+    blob = open(path, encoding="utf-8").read()
+    assert "<!-- POJIA-MODIFIER-MIRROR:BEGIN -->" in blob, "没写镜像层"
+    assert "<!-- POJIA-MODIFIER-MIRROR:END -->" in blob, "镜像层没有结束标记"
+
+    box.run("--target", "claude", "--claude-dir", d, "--revert", "--yes")
+    back = open(path, encoding="utf-8").read()
+    assert "POJIA-MODIFIER-MIRROR" not in back, "撤回没删掉镜像层"
+
+
+# --------------------------------------------------- C12 旧版本标记的兼容
+
+LEGACY_HEADERS = ("pjm:h=", "unlock-v6:h=", "unlock-v4:h=")
+
+
+@pytest.mark.parametrize("header", LEGACY_HEADERS)
+def test_c12_recognizes_legacy_hash_headers(box, header):
+    """老版本注入过的文件，必须认得出、撤得掉。
+
+    认不出来会走成"没有我们的块，无需还原"——用户以为还原了，实际一个字没动。
+    """
+    d = box.target("legacy")
+    path = os.path.join(d, "CLAUDE.md")
+    body = (
+        "# 用户自己的规则\n"
+        "\n"
+        "<!-- POJIA-NEXT-INJECT:BEGIN -->\n"
+        "<!-- " + header + "0123456789ab -->\n"
+        "这是旧版本写进来的政策正文，用户不该看到它。\n"
+        "<!-- POJIA-NEXT-INJECT:END -->\n"
+    )
+    open(path, "w", encoding="utf-8", newline="").write(body)
+
+    r = box.run("--target", "claude", "--claude-dir", d, "--revert", "--yes")
+    assert r.returncode == 0, box.out(r)
+    back = open(path, encoding="utf-8").read()
+    assert "旧版本写进来的政策正文" not in back, \
+        "旧标记 %s 没被认出来，块还留在文件里" % header
+    assert "用户自己的规则" in back, "用户原文被一起删掉了"
+
+
 # ------------------------------------------------- 已知偏差（新实现应修）
 
 @pytest.mark.xfail(strict=True, reason=(

@@ -1,0 +1,105 @@
+# 本地净化工具链，不发布
+*.pyc
+.workbuddy/
+__pycache__/
+
+# 运行日志与 IDE 配置：含本机路径 / 账号 GUID，属中间产物，不入库
+破甲日志.txt
+*.log
+.idea/
+_ad_poster.html
+_qq/
+c1.json
+c2.json
+clean.py
+commits.json
+decrypt_seal.py
+diag.py
+pojia.py
+历史备份/
+.workbuddy-ai/
+
+# 运行期状态（补丁清单，含本机绝对路径，不入库）
+状态/
+src/状态/
+
+# 人格库：用户自己的片段（含个人文风/业务上下文），属于个人配置，不入库
+人格库/
+src/人格库/
+
+# 工作日志（.workbuddy-ai 的镜像），不进仓库
+memory/
+
+# 测试产物
+.pytest_cache/
+
+# 打包产物（PyInstaller）
+build/
+dist/
+*.spec
+
+# 签名私钥与证书：绝不入库。*.pfx/*.pvk 是私钥，泄漏等于任何人都能冒充发布者。
+*.pfx
+*.pvk
+*.spc
+*.p12
+*.cer
+
+# 例外：**公钥**证书要入库 —— 它是验签的锚点。没有它，用户验签时还是得回头
+# 信任发布页，签名就真只剩装逼了。私钥（.pfx / .pvk）仍然挡在上面。
+!tools/codesign/*.cer
+
+# set-signing-secrets.ps1 在没装 gh 时会把 pfx 的 base64 落在这里，等用户手动
+# 粘进 GitHub。这就是私钥本身，一个字都不能进仓库。
+.signing-secrets.local/
+
+# temp snapshots
+*.bak
+*.bak-*
+
+# GitHub API 临时响应：查 Release / CI 时 curl 落的隐藏点文件，属中间产物
+.r*.json
+.p*.json
+
+# 比对用的上游快照：只在本地留一份，不入库
+upstream/
+_trace.py
+_repl.py
+_repl2.py
+_repl3.py
+_bulk.py
+_new.py
+_new2.py
+_pcmp.py
+_pcmp2.py
+_pcmp3.py
+_rescale.py
+_export.py
+_tavern.py
+_tavern_nsfw.txt
+
+_rename_refs.py
+_rebrand.py
+_patch_b.py
+.spec-src/
+_rebrand2.py
+_cmt_fix.py
+_cmt_fix2.py
+_cmt_fix3.py
+_cmt_fix4.py
+_cmt_fix5.py
+_cmt_fix6.py
+_cmtchk.py
+_rename_fn.py
+_rename_const.py
+_strip_cmt.py
+_patch_*.py
+_restore_check.py
+_pcmp*.py
+_rescale.py
+_export.py
+_tavern*.py
+_rename_refs.py
+_rebrand*.py
+_cmt*.py
+_strip_cmt.py
