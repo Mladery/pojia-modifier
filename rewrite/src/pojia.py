@@ -108,6 +108,7 @@ OPT = {
     "purge_spill": False,
     "keep_cache": False,
     "dsh_mode": "inject",        # inject=改磁盘文件；preset=只登记模式
+    "git_bash": None,            # None=保持现状；True=接管；False=卸掉
     "zpatch": False,
 }
 
@@ -2706,22 +2707,27 @@ def yaml_ok(text):
         return False, str(exc).replace("\n", " ")[:140]
 
 
-def _preset_drop_entry(text):
-    """把带标记的那一段整段剪掉。"""
+def _drop_marked(text, mark):
+    """把 `# >>> mark` 到 `# <<< mark` 之间的整段剪掉。预设和 Git Bash 接管共用。"""
     lines = (text or "").split("\n")
     out, skipping = [], False
     for line in lines:
-        if line.lstrip().startswith("# >>> " + PRESET_MARK):
+        if line.lstrip().startswith("# >>> " + mark):
             skipping = True
             continue
         if skipping:
-            if line.lstrip().startswith("# <<< " + PRESET_MARK):
+            if line.lstrip().startswith("# <<< " + mark):
                 skipping = False
             continue
         out.append(line)
     while out and not out[-1].strip():
         out.pop()
     return "\n".join(out) + "\n" if out else ""
+
+
+def _preset_drop_entry(text):
+    """把破甲模式那一段整段剪掉。"""
+    return _drop_marked(text, PRESET_MARK)
 
 
 def preset_installed(config_root):
@@ -2809,6 +2815,380 @@ def preset_remove(config_root, dry=False):
     if not done:
         return True, "破甲模式未注册，无需移除"
     return True, "破甲模式已移除（%s）" % "、".join(done)
+
+
+# ---------------------------------------------------------------------------
+# 5.9 Git Bash 接管（--git-bash）
+# ---------------------------------------------------------------------------
+#
+# Windows 上 DSH 的 bash 工具有两个坑：
+#   1. PATH 里 System32\bash.exe 是 WSL 入口，永远抢在 Git 前面，命令被 WSL 接走；
+#   2. Git Bash 是 MSYS2 运行时，启动要建带显式 DACL 的命名管道，DSH 的受限令牌下
+#      CreateNamedPipeW 直接 ACCESS_DENIED，msys 以 0xC0000142 退出。
+# 第一条靠 PATH 前置解决；第二条换成 busybox-w32 的 sh（原生 Win32、静态链接、
+# 不建命名管道），做法是包一层 executeArgv，把 [bash,-c,cmd] 换成 [busybox,sh,-c,cmd]。
+#
+# 落点：每个 profile 的 cordis.patch.yml 追加一段带标记的补丁 + 往该 profile 的
+# node_modules 里放一个小插件包。全部可撤回，删掉标记段即回到 PowerShell。
+
+GITBASH_ID = "pojia-gitbash"
+GITBASH_MARK = "pojia-gitbash"
+WSL_BASH_TAILS = ("\\windows\\system32\\bash.exe", "\\windowsapps\\bash.exe")
+GITBASH_MIRRORS = (
+    ("Git for Windows 官方", "https://git-scm.com/download/win"),
+    ("npmmirror 镜像", "https://registry.npmmirror.com/-/binary/git-for-windows/"),
+    ("清华镜像", "https://mirrors.tuna.tsinghua.edu.cn/github-release/git-for-windows/git/"),
+)
+
+GITBASH_PKG = u"""{
+  "name": "pojia-gitbash",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "description": "把 Git Bash 放到 PATH 最前，并用 busybox ash 顶替 MSYS bash",
+  "license": "MIT",
+  "sideEffects": true
+}"""
+
+GITBASH_JS = r"""// pojia-gitbash —— 让 DSH 的 bash 工具在 Windows 上真的能跑。
+//
+// 两个坑：
+// 1. PATH：Windows 的系统目录排在用户目录前面，System32ash.exe 是 WSL 入口，
+//    永远抢在 Git 前面，命令会被 WSL 接走（路径全变成 /mnt/c）。
+// 2. 沙箱：Git Bash 是 MSYS2 运行时，启动时要建一个带显式 DACL 的命名管道
+//    （signal pipe）。DSH 的 Windows 沙箱把子进程放进 WRITE_RESTRICTED 令牌，
+//    那份 DACL 里没有 restricting SID，CreateNamedPipeW 直接 ACCESS_DENIED，
+//    msys 就以 0xC0000142 退出 —— 只有切到「完全访问」才跑得动。
+//
+// 第一条靠 PATH 前置解决。第二条换成 busybox-w32 的 sh：原生 Win32、静态链接、
+// 不建命名管道，同样的受限令牌下跑得干干净净。换法是包一层 executeArgv，把
+// ["bash","-c",cmd] 换成 [busybox,"sh","-c",cmd] —— 沙箱、令牌、写限制全不动。
+import { delimiter, dirname } from "node:path";
+import { existsSync } from "node:fs";
+
+export const name = "pojia-gitbash";
+
+// 工具名还叫 bash，但底下跑的是 busybox 的 sh（ash）。不告诉模型，它就会写
+// arr=(a b)、[[ ]]、<<< 这类 bash 独有的东西，然后每一条都报语法错。
+const ASH_NOTE = [
+  "The `bash` tool on this machine executes busybox ash, not GNU bash.",
+  "Write POSIX sh only: $(...), &&, ||, |, for, if, case, functions, [ ... ] test brackets.",
+  "Do NOT use bash-only syntax: arrays like arr=(a b), [[ ... ]], <<< here-strings,",
+  "process substitution like <(...), brace expansion like {a,b}, $'...' quoting, mapfile, local -n.",
+  "For process substitution write an intermediate file instead.",
+].join("\n");
+
+function swap(argv, bb) {
+  if (!Array.isArray(argv) || argv.length === 0) return argv;
+  if (String(argv[0]).toLowerCase() !== "bash") return argv;
+  return [bb, "sh", ...argv.slice(1)];
+}
+
+function installShim(shell, bb) {
+  if (!shell || typeof shell.executeArgv !== "function") return "no-executor";
+  if (shell.__pojiaShell === bb) return "already";
+  const orig = shell.executeArgv.bind(shell);
+  shell.__pojiaShell = bb;
+  shell.executeArgv = (spec, argvOrPrepare, onStarted) => {
+    if (typeof argvOrPrepare === "function") {
+      return orig(spec, async (signal) => swap(await argvOrPrepare(signal), bb), onStarted);
+    }
+    return orig(spec, swap(argvOrPrepare, bb), onStarted);
+  };
+  return "patched";
+}
+
+export function apply(ctx, config) {
+  const exe = String((config && config.exe) || "").trim();
+  const bb = String((config && config.busybox) || "").trim();
+
+  if (exe) {
+    const dir = dirname(exe);
+    const lower = dir.toLowerCase();
+    const rest = (process.env.PATH || "")
+      .split(delimiter)
+      .filter((p) => p && p.toLowerCase() !== lower);
+    process.env.PATH = [dir, ...rest].join(delimiter);
+    process.env.POJIA_GIT_BASH = exe;
+    console.log(`[pojia-gitbash] PATH 已前置 ${dir}`);
+  }
+
+  if (!bb || !existsSync(bb)) {
+    console.log("[pojia-gitbash] 没有 busybox，保留 Git Bash（受限沙箱下会 0xC0000142）");
+    return;
+  }
+
+  const hit = (shell) => {
+    const r = installShim(shell, bb);
+    if (r === "patched") console.log(`[pojia-gitbash] shell 已换 busybox: ${bb}`);
+    return r;
+  };
+  const now = typeof ctx.get === "function" ? ctx.get("shell") : null;
+  let ok = false;
+  if (now && hit(now) === "patched") ok = true;
+  if (!ok && typeof ctx.inject === "function") {
+    ctx.inject(["shell"], (scope) => hit((scope && scope.shell) || scope.get("shell")));
+  }
+
+  // 工具名还叫 bash —— 不能重命名（defineTool 里写死的），只能把语义讲清楚。
+  if (typeof ctx.inject === "function") {
+    ctx.inject(["systemPrompt"], (scope) => {
+      scope.systemPrompt.context({
+        name: "pojia:shell-dialect",
+        order: 117,
+        text: () => ASH_NOTE,
+      });
+    });
+  }
+}
+"""
+
+
+def gitbash_dir(config_root):
+    """PortableGit 的落点（用户手动放的也认这里）。"""
+    owned = owned_dir(config_root)
+    return os.path.join(owned, "gitbash") if owned else ""
+
+
+def is_wsl_bash(path):
+    low = os.path.normcase(os.path.abspath(path)).lower()
+    return any(low.endswith(t) for t in WSL_BASH_TAILS)
+
+
+def git_bash_candidates(config_root):
+    out = []
+
+    def add(path):
+        if not path:
+            return
+        p = os.path.normpath(expand(str(path).strip().strip('"')))
+        if not p or is_wsl_bash(p) or p in out:
+            return
+        out.append(p)
+
+    add(os.environ.get("POJIA_GIT_BASH"))
+    add(os.path.join(gitbash_dir(config_root), "bin", "bash.exe"))
+    pf = os.environ.get("ProgramFiles") or r"C:\Program Files"
+    pf86 = os.environ.get("ProgramFiles(x86)") or r"C:\Program Files (x86)"
+    lad = os.environ.get("LOCALAPPDATA") or ""
+    for p in (os.path.join(pf, "Git", "bin", "bash.exe"),
+              os.path.join(pf86, "Git", "bin", "bash.exe"),
+              os.path.join(lad, "Programs", "Git", "bin", "bash.exe")):
+        add(p)
+    add(os.environ.get("CODEBUDDY_CODE_GIT_BASH_PATH"))
+    add(os.path.join(home(), "scoop", "apps", "git", "current", "bin", "bash.exe"))
+    if IS_WIN:
+        try:
+            import winreg
+            for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+                try:
+                    with winreg.OpenKey(hive, r"SOFTWARE\GitForWindows") as handle:
+                        add(os.path.join(str(winreg.QueryValueEx(handle, "InstallPath")[0]),
+                                         "bin", "bash.exe"))
+                except OSError:
+                    continue
+        except ImportError:
+            pass
+    return out
+
+
+def git_bash_probe(exe, timeout=8):
+    """起一次 bash 看版本。返回 (版本, 系统名)；跑不起来或其实是 WSL 就给空。"""
+    if not exe or not os.path.isfile(long_path(exe)):
+        return "", ""
+    try:
+        done = subprocess.run(
+            [exe, "-c", "printf '%s|%s' \"$BASH_VERSION\" \"$(uname -s 2>/dev/null)\""],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout,
+            creationflags=(0x08000000 if IS_WIN else 0))
+    except (OSError, subprocess.SubprocessError):
+        return "", ""
+    text = (done.stdout or b"").decode("utf-8", "replace").strip()
+    ver, _sep, sysname = text.partition("|")
+    if not ver or "linux" in sysname.lower():
+        return "", ""
+    return ver, sysname
+
+
+def find_git_bash(config_root):
+    for exe in git_bash_candidates(config_root):
+        ver, sysname = git_bash_probe(exe)
+        if ver:
+            return exe, ver, sysname
+    return "", "", ""
+
+
+def gitbash_patch_text(exe, busybox=""):
+    """追加到 profile 的 cordis.patch.yml 的那一段。"""
+    q = lambda s: json.dumps(s, ensure_ascii=False)
+    conf = "        exe: " + q(exe) + "\n"
+    if busybox:
+        conf += "        busybox: " + q(busybox) + "\n"
+    return (
+        "# >>> " + GITBASH_MARK + "  Git Bash 接管（Windows）\n"
+        "# 由 %s 写入：把 bash 工具与执行器切到 Git Bash，并让 bash 解析到它。\n" % VAULT_APP +
+        "# 删掉这一段即等于卸载（DSH 回到 PowerShell）。\n"
+        "- id: bash-sandbox\n"
+        "  disabled: false\n"
+        "- id: pwsh-sandbox\n"
+        "  disabled: true\n"
+        "- id: tool-bash\n"
+        "  disabled: false\n"
+        "- id: tool-pwsh\n"
+        "  disabled: true\n"
+        "- insert:\n"
+        "    - id: " + GITBASH_ID + "\n"
+        "      name: '" + GITBASH_ID + "'\n"
+        "      config:\n"
+        + conf +
+        "# <<< " + GITBASH_MARK + "\n"
+    )
+
+
+def gitbash_installed(config_root):
+    return any(GITBASH_MARK in (read_strict(os.path.join(p, "cordis.patch.yml")) or "")
+               for p in profile_dirs(config_root))
+
+
+def gitbash_state(config_root):
+    """-> (状态, 说明, exe)。状态 ok / warn / none / na。"""
+    profs = profile_dirs(config_root)
+    if not profs:
+        return "na", "Git Bash 接管：没有 profiles/*（非桌面版布局，不适用）", ""
+    hit, exe, bb = 0, "", 0
+    for prof in profs:
+        text = read_strict(os.path.join(prof, "cordis.patch.yml")) or ""
+        if GITBASH_MARK not in text:
+            continue
+        hit += 1
+        if not exe:
+            found = re.search(r"exe:\s*(\".*?\")", text)
+            if found:
+                try:
+                    exe = json.loads(found.group(1))
+                except ValueError:
+                    exe = ""
+        found = re.search(r"busybox:\s*(\".*?\")", text)
+        if found:
+            try:
+                if os.path.isfile(long_path(json.loads(found.group(1)))):
+                    bb += 1
+            except ValueError:
+                pass
+    if hit == len(profs):
+        ver, _sysname = git_bash_probe(exe) if exe else ("", "")
+        if not ver:
+            return "warn", "Git Bash 接管：已配置但路径跑不起来（%s）" % (exe or "空"), exe
+        if bb == hit:
+            return "ok", "Git Bash 接管：已启用（ash %s，沙箱内可跑）" % ver, exe
+        return "warn", ("Git Bash 接管：只有 bash %s，busybox 缺失，"
+                        "受限沙箱下会 0xC0000142（跑 --fetch-tools busybox64.exe）" % ver), exe
+    if hit:
+        return "warn", "Git Bash 接管：只在 %d/%d 个 profile 里" % (hit, len(profs)), exe
+    return "none", "Git Bash 接管：未启用（--git-bash 打开）", ""
+
+
+def gitbash_install(config_root, exe, dry=False):
+    """-> (ok, 说明)。写插件包 + 追加标记段，都不动官方文件。"""
+    profs = profile_dirs(config_root)
+    if not profs:
+        return False, "没有 profiles/*/cordis.patch.yml（非桌面版布局），Git Bash 接管不适用"
+    busybox = tool_path("busybox64.exe") if tool_present("busybox64.exe") else ""
+    row = gitbash_patch_text(exe, busybox)
+    done, notes = [], []
+    for prof in profs:
+        yml = os.path.join(prof, "cordis.patch.yml")
+        tag = os.path.basename(prof)
+        text, bom, eol = read_or_default(yml)
+        if text is None:
+            return False, "%s 读不到内容，整批停下（已写的保持原样）" % tag
+        base = _drop_marked(text, GITBASH_MARK)
+        if base and not base.endswith("\n"):
+            base += "\n"
+        new = base + row
+        ok, why = yaml_ok(new)
+        if not ok:
+            return False, "%s 生成的内容 YAML 解析不过（%s），已跳过" % (tag, why or "结构不对")
+        if dry:
+            done.append(tag + (" 将重写" if GITBASH_MARK in text else " 将写入"))
+            continue
+        pkg = os.path.join(prof, "node_modules", GITBASH_ID)
+        if not ensure_dir(pkg):
+            return False, "%s 的插件目录建不出来" % tag
+        if not write_text(os.path.join(pkg, "package.json"), GITBASH_PKG, False, "\n"):
+            return False, "%s 的 package.json 写不进去" % tag
+        if not write_text(os.path.join(pkg, "index.js"), GITBASH_JS, False, "\n"):
+            return False, "%s 的 index.js 写不进去" % tag
+        ensure_backup(yml, ".dshgitbash.bak", "")
+        if not write_text(yml, new, bom, eol):
+            return False, "%s 写不进去" % tag
+        done.append(tag + (" 已重写" if GITBASH_MARK in text else " 已写入"))
+    if not busybox:
+        notes.append("没取到 busybox（跑 --fetch-tools busybox64.exe），受限沙箱下 bash 会以 0xC0000142 失败")
+    head = "Git Bash 接管将写入" if dry else "Git Bash 接管已写入"
+    tail = "" if dry else "，重启 DSH 后 bash 工具即可用（%s）" % exe
+    msg = "%s（%s）%s" % (head, "、".join(done), tail)
+    if notes:
+        msg += "；" + "；".join(notes)
+    return True, msg
+
+
+def gitbash_remove(config_root, dry=False):
+    """-> (ok, 说明)。剪掉标记段并删掉插件包。"""
+    profs = profile_dirs(config_root)
+    if not profs:
+        return True, "没有 profiles/*，无需移除"
+    done = []
+    for prof in profs:
+        yml = os.path.join(prof, "cordis.patch.yml")
+        tag = os.path.basename(prof)
+        text, bom, eol = read_or_default(yml)
+        if text is None or GITBASH_MARK not in text:
+            continue
+        if dry:
+            done.append(tag + " 将移除")
+            continue
+        ensure_backup(yml, ".dshgitbash.bak", "")
+        new = _drop_marked(text, GITBASH_MARK)
+        if not write_text(yml, new, bom, eol):
+            return False, "%s 写不回去" % tag
+        pkg = os.path.join(prof, "node_modules", GITBASH_ID)
+        if os.path.isdir(long_path(pkg)):
+            shutil.rmtree(long_path(pkg), ignore_errors=True)
+        bak = backup_path(yml, ".dshgitbash.bak")
+        if os.path.isfile(long_path(bak)) and (read_strict(bak) or None) == (new or None):
+            remove_file(bak)
+        done.append(tag + " 已移除")
+    if not done:
+        return True, "Git Bash 接管未启用，无需移除"
+    return True, "Git Bash 接管已移除（%s）" % "、".join(done)
+
+
+def gitbash_hint():
+    """找不到 Git Bash 时给的下一步。"""
+    lines = ["没找到 Git Bash。装一个 Git for Windows（或设 POJIA_GIT_BASH 指向 bash.exe）："]
+    for name, url in GITBASH_MIRRORS:
+        lines.append("  %s：%s" % (name, url))
+    lines.append("  绿色版解压到 %s 也认（放 bin/bash.exe）" % gitbash_dir(home()))
+    return "\n".join(lines)
+
+
+def do_git_bash(enable):
+    """--git-bash / --no-git-bash 的独立入口（不带 --apply 时走这里）。"""
+    tgt = get_target("dsh")
+    cfg = tgt.config_root() if tgt else os.path.join(home(), ".dsh")
+    if not enable:
+        ok, note = gitbash_remove(cfg, OPT["dry"])
+        say(note)
+        return 0 if ok else 1
+    exe, ver, _sysname = find_git_bash(cfg)
+    if not exe:
+        say(gitbash_hint())
+        return 1
+    say("找到 Git Bash：%s（bash %s）" % (exe, ver))
+    ok, note = gitbash_install(cfg, exe, OPT["dry"])
+    say(note)
+    return 0 if ok else 1
 
 
 # ---------------------------------------------------------------------------
@@ -4322,12 +4702,40 @@ class DshTarget(Target):
         if preset_installed(self.config_root()):
             ok, note = preset_remove(self.config_root(), OPT["dry"])
             say("  [预设] %-12s %s" % (self.key, note))
+        if gitbash_installed(self.config_root()):
+            ok, note = gitbash_remove(self.config_root(), OPT["dry"])
+            say("  [接管] %-12s %s" % (self.key, note))
         return res
+
+    def after_apply(self, root):
+        """注入成功后的收尾：先删运行时缓存，再按需接管 Git Bash。"""
+        if OPT["dry"] or OPT["keep_cache"]:
+            pass
+        else:
+            data = getattr(self, "data_root", "")
+            cache = os.path.join(data, "cache", "acc-product-config-v3.json") if data else ""
+            if cache and os.path.isfile(long_path(cache)) and remove_file(cache):
+                say("  [清理] %-12s 运行时缓存已删（下次启动重建）" % self.key)
+        if OPT["git_bash"] is not True:
+            return
+        if OPT["dsh_mode"] == "preset":
+            say("  [接管] %-12s 预设模式不动 bash 工具，跳过 Git Bash" % self.key)
+            return
+        exe, ver, _sysname = find_git_bash(self.config_root())
+        if not exe:
+            say(gitbash_hint())
+            return
+        ok, note = gitbash_install(self.config_root(), exe, OPT["dry"])
+        say("  [接管] %-12s %s" % (self.key, note))
+        if ok:
+            say("  [接管] %-12s 用 %s（bash %s）" % (self.key, exe, ver))
 
     def status(self, root, ctx):
         state, note = super(DshTarget, self).status(root, ctx)
         _kind, pnote = preset_state(self.config_root())
-        return state, (note + "；" + pnote if note else pnote)
+        _k2, gnote, _exe = gitbash_state(self.config_root())
+        tail = "；".join([x for x in (pnote, gnote) if x])
+        return state, (note + "；" + tail if note else tail)
 
 
 def _glob(base, pattern):
@@ -5811,7 +6219,10 @@ def build_parser():
     a("--mac-check", dest="mac_check", nargs="?", const="", metavar="APP",
       help="macOS：检查 .app 的代码签名（不传路径就扫 /Applications 与 ~/Applications）")
     a("--resign", action="store_true", help="macOS 重签名")
-    a("--git-bash", dest="git_bash", action="store_true", help="Git Bash 接管")
+    a("--git-bash", dest="git_bash", action="store_true", default=None,
+      help="接管 Git Bash：把 DSH 的 bash 工具切到 Git Bash（配合 --apply，或单独执行）")
+    a("--no-git-bash", dest="git_bash", action="store_false",
+      help="关掉 Git Bash 接管（DSH 回到 PowerShell）")
     a("--guard", dest="guard", nargs="?", const="status",
       choices=["install", "remove", "status"], help="运行时守卫：install / remove / status")
     a("--fetch-tools", dest="fetch_tools", nargs="?", const="", metavar="NAMES",
@@ -5865,6 +6276,7 @@ def main(argv=None):
     OPT["purge_spill"] = bool(o.purge_spill)
     OPT["keep_cache"] = bool(o.keep_cache)
     OPT["dsh_mode"] = str(o.dsh_mode or "inject")
+    OPT["git_bash"] = o.git_bash
     collect_explicit(o)
 
     if o.version:
@@ -5956,9 +6368,8 @@ def main(argv=None):
     if o.resign:
         say("--resign 不在本实现范围内（见 README 的边界一节）。")
         return 0
-    if o.git_bash:
-        say("--git-bash 不在本实现范围内（见 README 的边界一节）。")
-        return 0
+    if o.git_bash is not None and not (o.apply or o.revert):
+        return do_git_bash(o.git_bash)
     if o.guard:
         return do_guard(o.guard)
     if o.fetch_tools is not None:
