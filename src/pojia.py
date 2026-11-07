@@ -1926,7 +1926,7 @@ def normalize_picked(path, default_names, templates, valid):
 
 
 # ---------------------------------------------------------------------------
-# 5.5 快捷方式反查（本项目新增，8.13 之后）
+# 5.5 快捷方式反查
 #
 # 大量 Electron 应用不往注册表写 InstallLocation，注册表这条路直接空手。
 # 快捷方式里的 LinkInfo 是唯一可靠的线索。全程只读，解不出来就跳过，
@@ -2109,7 +2109,7 @@ def shortcut_files(limit=1500):
 
 
 # ---------------------------------------------------------------------------
-# 5.6 Everything 检索（本项目新增，8.13 之后）
+# 5.6 Everything 检索
 #
 # 全盘索引，比有界遍历快两个数量级。两条路：es.exe 命令行，或内置 DLL 的 SDK。
 # 没有 Everything、DLL 位数不匹配、服务没起，一律静默降级——定位阶段不许抛。
@@ -6076,7 +6076,7 @@ def do_compare(ctx, targets):
 
 
 # ---------------------------------------------------------------------------
-# 10.5 会话快照清理与泄密扫描（本项目新增，8.13 之后）
+# 10.5 会话快照清理与泄密扫描
 #
 # 这些副本是产品自己留在 TEMP 和 <data>/cache 里的配置文件拷贝，里面有明文 API Key。
 # 默认只统计不删：它们不在备份范围内，删了 --revert 也找不回来。
@@ -6284,9 +6284,9 @@ def do_clean_spill(targets):
 # 下载一律先落 .part 再改名，校验不过就删掉，绝不留半成品。
 # 启动时那次检查**只提示不安装**——用户不该在不知情的时候被升级。
 
-UPDATE_REPO = "https://github.com/Mladery/pojia-ce"
+UPDATE_REPO = "https://github.com/Mladery/pojia-modifier"
 UPDATE_API = os.environ.get("POJIA_UPDATE_API") or \
-    "https://api.github.com/repos/Mladery/pojia-ce/releases/latest"
+    "https://api.github.com/repos/Mladery/pojia-modifier/releases/latest"
 UPDATE_CACHE = "_update.json"
 UPDATE_TTL = 86400
 

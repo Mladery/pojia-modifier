@@ -1,11 +1,11 @@
 # 破甲修改器
 
-> 产物名 `pojia-modifier`，对外版本号 **`v1.0`**，MIT。
+> 产物名 `pojia-modifier`，对外版本号 **`v1.0`**，MIT 正文 + Commons Clause。
 > 仅限在**自己有权管理的本机设备**上使用，下载前请读 [完整免责声明](docs/disclaimer.md)。
 
 [![CI](https://github.com/Mladery/pojia-modifier/actions/workflows/ci.yml/badge.svg)](https://github.com/Mladery/pojia-modifier/actions/workflows/ci.yml)
 [![Build](https://github.com/Mladery/pojia-modifier/actions/workflows/build.yml/badge.svg)](https://github.com/Mladery/pojia-modifier/actions/workflows/build.yml)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT%20%2B%20Commons%20Clause-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
 
 **一句话：把你电脑上 17 个 AI 客户端「自己改不到的内置提示词」，换成你自己写的那份。**
@@ -21,7 +21,7 @@
 
 ## 使用边界（必读）
 
-> 以下是摘要。**初次下载的用户请务必读一遍 [完整免责声明](docs/disclaimer.md)** —— 含许可边界、滥用后果与权利人通知渠道。
+> 以下是摘要。**初次下载的用户请务必读一遍 [完整免责声明](docs/disclaimer.md)** —— 含 Commons Clause 的边界、授权范围与权利人通知渠道。
 
 - **只动你自己的机器。** 读写限于本机安装目录与用户目录，不碰他人网站 / 服务器 / 账号，不修改任何服务端，不伪造请求。
 - **不是破解工具。** 不生成注册码、不伪造许可证、不绕过付费墙。它改的是你自己机器上的提示词文本。
@@ -29,18 +29,10 @@
 - **无后门、无遥测。** 无账号、无登录、无统计、无云控、**无静默更新** —— 从不自动下载、自动替换、自动重启。升级只有一条路：你按下「安装」（界面上的按钮 / 菜单 / `--update`）。核心流程（定位 → 备份 → 替换 → 校验 → 还原）全程离线。
 - **联网只做三件事，都只下载、都可关。** ① `--fetch-tools` 拉 busybox 与 Everything 的官方二进制；② `--git-bash` 拉 Git for Windows 安装包；③ 启动 / 打开界面时查一次「有没有新版」——只读 GitHub 公开的 `releases/latest`，不带任何本机信息、不发 query，结果缓存一天，查到了也只是一个提示加一个安装按钮。不想让它查：界面上点「以后再说」，命令行加 `--no-update-check`。
 - **后果自负。** 按现状（AS IS）提供，无任何担保。目标客户端可能异常、更新失效、配置损坏或账号受限 —— 这些风险由使用者承担。
-- **严禁违法用途。** 不得用于未授权侵入、数据窃取、制作传播恶意程序，或生成法律明令禁止的内容。
 
 ## 界面
 
 ![首屏：选软件、DSH 处理方式、这次会做什么](docs/images/screenshot-home.png)
-
-<details>
-<summary>点「一键破甲」会先弹确认框（截图）</summary>
-
-![确认框：列出要改哪些软件、改什么、怎么反悔](docs/images/screenshot-confirm.png)
-
-</details>
 
 就是本机网页 UI：脚本起一个只绑 `127.0.0.1` 的页面，带随机 token，关掉窗口即退出。
 
@@ -159,7 +151,7 @@ Linux 上自动往应用菜单里放一项；装的时候问要不要把 `~/.loc
 ## 校验
 
 ```
-1179da65501648d4e5edaef8be3c4391ceae2ac58ed3bca6c1c36404cde8fff9  src/pojia.py       (275,563 B / LF)
+3ae0d6c07376bc641dba42d16855a019bf31fc47acf4c76d0e310c153f9c2284  src/pojia.py       (275,470 B / LF)
 64c1b4b54bea14d5dba726384f7ed2ed2fa61231120822e7eb3c3099d0dc76ee  src/pojia_gui.py   (48,034 B / LF)
 ```
 
@@ -196,7 +188,7 @@ shasum -a 256 -c SHA256SUMS.txt    # macOS
 ## 仓库内容
 
 ```
-LICENSE                        MIT 正文
+LICENSE                        MIT 正文 + Commons Clause
 NOTICE                         目录职责、程序结构、运行时标记
 src/pojia.py                   命令行主程序（零第三方依赖）
 src/pojia_gui.py               图形界面：本机网页 UI，零依赖
@@ -206,8 +198,7 @@ tools/selftest.py              17 个目标的自检
 tools/                         打包与发布：PyInstaller、NSIS、POSIX 安装器、签名与验签
 vendor/everything/             Everything SDK 动态库（MIT），用于直查文件索引
 tests/contract/                26 条黑盒契约
-docs/                          行为规格、施工记录、免责声明、界面截图
-evidence/                      取证材料：提交时间线、群聊记录、防二改机制拆解
+docs/                          行为规格、免责声明、研发缘由、界面截图
 ```
 
 跑测试只需要 pytest（脚本本身零依赖），全部在临时目录里操作，**不碰真实的 `~`**：
@@ -237,12 +228,14 @@ python tools/embed_policy.py && git status --porcelain   # 必须为空
 
 ## 许可
 
-**MIT，Copyright (c) 2026 Mladery。** 许可正文见 [LICENSE](LICENSE)，目录职责与运行时标记见 [NOTICE](NOTICE)。
+**MIT 正文 + Commons Clause，Copyright (c) 2026 Mladery。** 许可正文见 [LICENSE](LICENSE)，目录职责与运行时标记见 [NOTICE](NOTICE)。
 
-**免费，但如实说明：MIT 允许他人转售。** 本项目不收费、不卖激活码。有人出售本软件本身不构成侵权（前提是保留 `LICENSE` 与 `NOTICE`）；可追究的只有三种：删除或隐瞒版权声明、以官方名义收费或暗示背书、使用本项目名称图标造成来源混淆。
+**免费，且不许拿它卖钱。** 自己用、公司内部用、教学研究、非营利项目集成、改了再送人 —— 都可以。卖安装包、卖「解锁版」、做付费下载站、包进付费产品或付费托管服务、收钱代部署代运维 —— 不在授权范围内。这是 [Commons Clause 1.0](https://commonsclause.com/) 的原文条件：它只从授权里排除「Sell」，其余 MIT 权利（使用、修改、再分发）原样保留。
+
+遇到有人收费：那不是官方行为，也超出了本许可；可追究的情形是未经授权收费（版权侵权）、删除或隐瞒版权与许可声明、以官方名义收费或暗示背书、使用本项目名称图标造成来源混淆。
 
 **第三方独立性。** 与 WorkBuddy / 腾讯、DeepSeek、Anthropic、OpenAI、Google、Cursor、字节跳动、Moonshot、GitHub 等均无隶属、合作、授权或背书关系。
 
-## 证据
+## 研发缘由
 
-`evidence/` 里三份独立文档，与工具本身无关，供需要溯源的人自取：[EVIDENCE.md](evidence/EVIDENCE.md)、[chat-evidence.md](evidence/chat-evidence.md)、[anti-tamper.md](evidence/anti-tamper.md)。
+这个项目为什么存在、三类现成做法差在哪、本项目的取舍：[docs/why.md](docs/why.md)。

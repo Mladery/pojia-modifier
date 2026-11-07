@@ -1,3 +1,39 @@
+MIT License + Commons Clause
+
+Copyright (c) 2026 Mladery
+
+本软件以 MIT 正文授权，并附加下文的 Commons Clause 许可条件。两者冲突时，以
+Commons Clause 为准：它不限制你使用、修改、再分发的权利，只从授权中排除「销售」。
+
+一句话：**自己用、公司内部用、改了再送人，都可以；拿它收钱不行。**
+
+================================================================================
+"Commons Clause" License Condition v1.0
+================================================================================
+
+The Software is provided to you by the Licensor under the License, as defined
+below, subject to the following condition.
+
+Without limiting other conditions in the License, the grant of rights under the
+License will not include, and the License does not grant to you, the right to
+Sell the Software.
+
+For purposes of the foregoing, "Sell" means practicing any or all of the rights
+granted to you under the License to provide to third parties, for a fee or other
+consideration (including without limitation fees for hosting or
+consulting/ support services related to the Software), a product or service
+whose value derives, entirely or substantially, from the functionality of the
+Software. Any license notice or attribution required by the License must also
+include this Commons Clause License Condition notice.
+
+Software: 破甲修改器 (pojia-modifier)
+License: MIT
+Licensor: Mladery
+
+================================================================================
+MIT 正文
+================================================================================
+
 MIT License
 
 Copyright (c) 2026 Mladery
@@ -19,3 +55,18 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+================================================================================
+备注
+================================================================================
+
+「不卖」的边界，具体到本项目：
+
+- 可以：自己装、公司内部装、教学、研究、非营利项目集成、改了再分发（保留本文件）
+- 不可以：卖安装包、卖「解锁版」、做付费下载站、把它包进付费产品或付费托管服务、
+  收钱代部署或代运维、收钱提供以本软件为主要价值的技术支持
+- 灰色：公司内部用它干活不收费，属于「使用」，不受限制；但把它的能力做成对外收费的
+  服务，就是 Sell
+
+附加 Commons Clause 后，本许可不再属于 OSI 定义的开源许可。`vendor/` 下的第三方组件
+沿用各自原有许可，不受本条影响。

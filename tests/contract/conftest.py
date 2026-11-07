@@ -25,6 +25,14 @@ _PASS_ENV = ("PATH", "SystemRoot", "SystemDrive", "COMSPEC", "PATHEXT",
 class Box(object):
     """一个完全隔离的沙箱：程序副本、假 HOME、假 AppData 全在里面。"""
 
+    # 系统组件自己往沙箱里写的东西，不算「本工具改了盘」。
+    # 实测：Windows 上 powershell.exe 一启动就建模块分析缓存（约 290 KB）。--status
+    # 为了判断客户端是否在跑会读一次进程命令行，于是拉起 powershell —— 缓存是它的
+    # 行为，不是本工具写的。它落在哪个前缀下取决于环境（沙箱里实测是直接落在根下的
+    # Microsoft\Windows\PowerShell\），所以按路径片段匹配，不按前缀。
+    # 断言仍然覆盖本工具写的每一个字节。
+    _NOISE_MARKS = ("microsoft/windows/powershell/",)
+
     def __init__(self, root):
         self.root = str(root)
         self.prog_dir = os.path.join(self.root, "prog")
@@ -79,6 +87,10 @@ class Box(object):
         os.makedirs(p, exist_ok=True)
         return p
 
+    def _is_noise(self, rel):
+        low = "/" + rel.replace("\\", "/").lower()
+        return any(mark in low for mark in self._NOISE_MARKS)
+
     def tree(self, top=None):
         """文件指纹表：相对路径 -> (字节数, sha256)。目录不记，空目录是噪音。"""
         import hashlib
@@ -89,6 +101,8 @@ class Box(object):
             for f in files:
                 p = os.path.join(base, f)
                 rel = os.path.relpath(p, top)
+                if self._is_noise(rel):
+                    continue
                 try:
                     with open(p, "rb") as fh:
                         blob = fh.read()

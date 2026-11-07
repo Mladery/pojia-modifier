@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """黑盒契约测试。
 
-每一条对应 `docs/spec/00-overview.md` 里的一条不变量，或者 `REPLACE.md` 第 3 节的
+每一条对应 `docs/spec/00-overview.md` 里的一条不变量，或者 `docs/spec/50-cli.md` 里的
 一条出口契约。全部通过子进程 + 命令行参数完成，**不 import 被测模块**——所以实现
 整体重写、改名、拆文件都不影响这一层。
 
-编号与 `REPLACE.md` 第 5 节一一对应。
+编号 C1… 与 `docs/spec/` 里的不变量编号对应。
 """
 import os
 import sys
