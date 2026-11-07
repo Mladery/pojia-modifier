@@ -4108,104 +4108,297 @@ def do_check(ctx, targets):
 
 
 # ---------------------------------------------------------------------------
-# 9. 计划任务
+# 9. 计划任务 / 运行时守卫
 # ---------------------------------------------------------------------------
+#
+# 任务名是磁盘契约：老版本装的就是 PojiaModifier_Refresh / PojiaModifier_Logon，
+# 升级后必须沿用同一组名字，否则旧任务继续跑旧脚本，两个守卫每半小时互相覆盖一次。
+# 更老的 WorkBuddyUnlock* 与早期写错的 POJIA-* 一律当遗留项清掉。
 
-TASK_REFRESH = "POJIA-Refresh"
-TASK_LOGON = "POJIA-Logon"
-OLD_TASK_NAMES = ("POJIA-AutoRefresh", "POJIA-AutoApply", "POJIA-Persist")
+TASK_REFRESH = "PojiaModifier_Refresh"
+TASK_LOGON = "PojiaModifier_Logon"
+GUARD_TARGETS = "wb,wbintl"
+GUARD_JOBS = (TASK_REFRESH, TASK_LOGON)
+LEGACY_TASKS = (
+    "POJIA-Refresh", "POJIA-Logon", "POJIA-AutoRefresh", "POJIA-AutoApply", "POJIA-Persist",
+    "WorkBuddyUnlockGuard", "WorkBuddyUnlockGuard_Hourly",
+    "WorkBuddyUnlockV3", "WorkBuddyUnlockV4", "WorkBuddyUnlockV4_Hourly",
+    "WorkBuddyUnlockV4_Logon", "WorkBuddyUnlockV6_Hourly", "WorkBuddyUnlockV6_Logon",
+)
+
+_TASK_XML = {}
+_NO_WINDOW = 0x08000000 if IS_WIN else 0
+
+
+def _quiet_python():
+    """优先 pythonw.exe：每 30 分钟弹一次黑框没人受得了。"""
+    exe = sys.executable
+    folder, base = os.path.split(exe)
+    if base.lower().startswith("pythonw"):
+        return exe
+    cand = os.path.join(folder, "pythonw.exe")
+    return cand if os.path.isfile(long_path(cand)) else exe
 
 
 def _task_cmd():
-    script = os.path.abspath(__file__)
-    return '"%s" "%s" --apply --quiet --yes' % (sys.executable, script)
+    """任务动作。冻结态直接跑 exe，脚本态跑当前解释器。"""
+    tail = "--apply --quiet --yes --target %s" % GUARD_TARGETS
+    if getattr(sys, "frozen", False):
+        return '"%s" %s' % (sys.executable, tail)
+    return '"%s" "%s" %s' % (_quiet_python(), os.path.abspath(__file__), tail)
 
 
 def _run(cmd, timeout=40):
     try:
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                             timeout=timeout, creationflags=(0x08000000 if IS_WIN else 0))
+                             timeout=timeout, creationflags=_NO_WINDOW)
         return res.returncode, (res.stdout or b"").decode("mbcs" if IS_WIN else "utf-8", "replace")
     except (OSError, subprocess.SubprocessError):
         return 1, ""
 
 
-def task_install():
+def _decode_task(raw, want="<Task"):
+    for enc in ("utf-16", "utf-8-sig", "utf-8", "gbk"):
+        try:
+            text = raw.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+        if want in text:
+            return text
+    return raw.decode("utf-8", "ignore")
+
+
+def task_xml(name):
+    """读任务定义。读不到就是空串——「没装」和「读不到」在这里不区分，都不阻断。"""
+    if name in _TASK_XML:
+        return _TASK_XML[name]
+    text = ""
     if IS_WIN:
-        if not is_admin():
-            return False, "创建计划任务需要管理员权限，请用管理员身份重新运行"
-        cmd = _task_cmd()
-        for name, extra in ((TASK_REFRESH, ["/SC", "MINUTE", "/MO", "30"]),
-                            (TASK_LOGON, ["/SC", "ONLOGON"])):
-            _run(["schtasks", "/Delete", "/TN", name, "/F"])
-            rc, out = _run(["schtasks", "/Create", "/F", "/TN", name, "/TR", cmd] + extra)
-            if rc != 0:
-                return False, "创建任务 %s 失败：%s" % (name, out.strip()[:120])
-        return task_verify()
-    return _cron_install()
+        try:
+            done = subprocess.run(["schtasks", "/Query", "/TN", name, "/XML"],
+                                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                  timeout=40, creationflags=_NO_WINDOW)
+            if done.returncode == 0:
+                text = _decode_task(done.stdout or b"")
+        except (OSError, subprocess.SubprocessError):
+            text = ""
+    _TASK_XML[name] = text
+    return text
 
 
-def task_verify():
-    ok, msg = True, []
-    for name in (TASK_REFRESH, TASK_LOGON):
-        rc, out = _run(["schtasks", "/Query", "/TN", name, "/FO", "LIST", "/V"])
-        if rc != 0:
-            return False, "任务 %s 查询不到" % name
-        if os.path.abspath(__file__).lower() not in out.lower().replace("/", "\\"):
-            ok = False
-            msg.append("%s 的动作没有指向本脚本" % name)
-    return ok, "；".join(msg) if msg else "两个任务都已指向本脚本"
+def sched_flush():
+    _TASK_XML.clear()
 
 
-def task_remove():
-    removed = []
-    for name in (TASK_REFRESH, TASK_LOGON) + OLD_TASK_NAMES:
-        if IS_WIN:
-            rc, _out = _run(["schtasks", "/Delete", "/TN", name, "/F"])
-            if rc == 0:
-                removed.append(name)
+def sched_has(name):
+    return bool(task_xml(name))
+
+
+def sched_cmd(name):
+    text = task_xml(name)
+    if not text:
+        return ""
+    pieces = re.findall(r"<Command>(.*?)</Command>", text, re.S)
+    pieces += re.findall(r"<Arguments>(.*?)</Arguments>", text, re.S)
+    return " ".join(p.strip() for p in pieces if p.strip())
+
+
+def points_here(text):
+    """动作里有没有提到本程序。脚本态比 pojia.py，冻结态比 exe 名。"""
+    low = str(text or "").lower().replace("/", "\\")
+    names = [os.path.basename(os.path.abspath(__file__)).lower()]
+    if getattr(sys, "frozen", False):
+        names.append(os.path.basename(sys.executable).lower())
+    return any(n and n in low for n in names)
+
+
+def cmd_missing_file(cmd):
+    """动作里引用的 .exe/.py 已经不在了——任务还在，但每次运行都是空的。"""
+    for hit in re.findall(r'"([^"]+\.(?:exe|py|bat|cmd|ps1))"', cmd or "", re.I):
+        if not os.path.isfile(long_path(hit)):
+            return hit
+    return ""
+
+
+def sched_ok(name):
+    """结构判据：整条命令行塞进 <Command> 时，Windows 会把它当成一个带空格的
+    程序名去找，任务永远跑不起来。这类任务「看起来装了」，实际是死的。"""
+    text = task_xml(name)
+    if not text:
+        return False, "取不到任务定义"
+    cmd_hit = re.search(r"<Command>(.*?)</Command>", text, re.S)
+    arg_hit = re.search(r"<Arguments>(.*?)</Arguments>", text, re.S)
+    command = cmd_hit.group(1).strip() if cmd_hit else ""
+    arguments = arg_hit.group(1).strip() if arg_hit else ""
+    if not command:
+        return False, "任务里没有 <Command>"
+    if arguments:
+        return (True, "") if points_here(arguments) else (False, "任务动作没指向本脚本")
+    if not points_here(command):
+        return True, ""
+    return False, "整条命令行塞进了 <Command>、没有 <Arguments>，任务跑不起来"
+
+
+def sched_last(name):
+    """上次运行结果。0 / 267009（正在运行）/ 267011（还没跑过）算正常。"""
+    try:
+        done = subprocess.run(["schtasks", "/Query", "/TN", name, "/V", "/FO", "LIST"],
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                              timeout=40, creationflags=_NO_WINDOW)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if done.returncode != 0:
+        return None
+    text = _decode_task(done.stdout or b"", want=":")
+    for line in text.splitlines():
+        label, sep, value = line.partition(":")
+        if not sep:
+            continue
+        if "result" not in label.strip().lower() and u"结果" not in label:
+            continue
+        value = value.strip()
+        if re.fullmatch(r"-?\d+", value):
+            return int(value)
+    return None
+
+
+def guard_drop_legacy():
+    """清掉遗留任务。返回清掉的名单。"""
+    gone = []
+    for name in LEGACY_TASKS:
+        if not sched_has(name):
+            continue
+        _run(["schtasks", "/Delete", "/TN", name, "/F"])
+        sched_flush()
+        if not sched_has(name):
+            gone.append(name)
+    sched_flush()
+    return gone
+
+
+def guard_install():
+    """装两个任务：每 30 分钟一次 + 每次登录一次。返回 (是否两条都在, 说明)。"""
+    if not IS_WIN:
+        return False, "运行时守卫只支持 Windows 计划任务"
+    admin = is_admin()
+    cmd = _task_cmd()
+    sched_flush()
+    gone = guard_drop_legacy()
+    if gone:
+        say("  已清掉遗留任务 %d 个：%s" % (len(gone), "、".join(gone)))
+    notes = []
+    for name, extra in ((TASK_REFRESH, ["/SC", "MINUTE", "/MO", "30"]),
+                        (TASK_LOGON, ["/SC", "ONLOGON"])):
+        _run(["schtasks", "/Delete", "/TN", name, "/F"])
+        argv = ["schtasks", "/Create", "/F", "/TN", name, "/TR", cmd] + extra
+        if name == TASK_LOGON and admin:
+            argv += ["/RL", "HIGHEST"]
+        rc, out = _run(argv)
+        sched_flush()
+        if not sched_has(name):
+            notes.append("%s 没装上%s" % (name, ("：" + out.strip().splitlines()[0][:100]) if out.strip() else ""))
+    rows = guard_rows()
+    ok = all(state == "ok" for _n, state, _d in rows)
+    if not admin:
+        notes.append("当前不是管理员：登录触发那条可能装不上，需要时右键「以管理员身份运行」再执行一次")
+    if not ok:
+        for name, state, detail in rows:
+            if state != "ok":
+                notes.append("%s：%s" % (name, detail))
+    return ok, "；".join(notes)
+
+
+def guard_remove():
+    """删掉本工具的全部任务（含遗留）。返回 (是否全删干净, 说明)。"""
+    if not IS_WIN:
+        return True, "当前系统没有计划任务"
+    sched_flush()
+    gone, stuck = [], []
+    for name in GUARD_JOBS + LEGACY_TASKS:
+        if not sched_has(name):
+            continue
+        _run(["schtasks", "/Delete", "/TN", name, "/F"])
+        sched_flush()
+        (gone if not sched_has(name) else stuck).append(name)
+    sched_flush()
+    msg = "已删除 %d 个任务" % len(gone) if gone else "本来就没装"
+    if stuck:
+        msg += "；%d 个删不掉：%s" % (len(stuck), "、".join(stuck))
+    return not stuck, msg
+
+
+def guard_rows():
+    """只读：每个任务一行 (名字, 状态, 说明)。状态 ok / missing / broken / foreign。"""
+    rows = []
+    for name in GUARD_JOBS:
+        if not sched_has(name):
+            rows.append((name, "missing", "没有这个任务"))
+            continue
+        ok, why = sched_ok(name)
+        cmd = sched_cmd(name)
+        if not ok:
+            rows.append((name, "broken", why))
+            continue
+        if not points_here(cmd):
+            rows.append((name, "foreign", "指向的不是本程序：%s" % (cmd[:90] or "(取不到)")))
+            continue
+        miss = cmd_missing_file(cmd)
+        if miss:
+            rows.append((name, "broken", "动作里的文件已经不存在：%s" % miss))
+            continue
+        rows.append((name, "ok", cmd[:90]))
+    return rows
+
+
+def do_guard(mode):
+    """命令行入口。status 无论装没装都退 0——「没装」是正常状态，不是错误。"""
+    mode = (mode or "status").strip().lower()
+    if mode == "status":
+        if not IS_WIN:
+            say("运行时守卫：只支持 Windows 计划任务；当前系统没有。")
+            return 0
+        rows = guard_rows()
+        alive = [r for r in rows if r[1] == "ok"]
+        say("")
+        for name, state, detail in rows:
+            if state == "ok":
+                say("  [正常] %s" % name)
+                say("         动作 = %s" % detail)
+            elif state == "missing":
+                say("  [未装] %s" % name)
+            else:
+                say("  [异常] %s：%s" % (name, detail))
+                say("         修法：--guard install 会删掉重建")
+            if state != "missing":
+                last = sched_last(name)
+                if last not in (None, 0, 267009, 267011):
+                    say("         上次运行结果 = %d（非 0 = 没跑成功）" % last)
+        if len(alive) == len(rows):
+            say("  结论：两个任务都在，动作都指向本程序。")
+        elif not alive:
+            say("  结论：没装。--guard install 可装（每 30 分钟 + 每次登录自动重打）。")
         else:
-            _cron_remove_one(name)
-    return True, "已删除：%s" % ("、".join(removed) if removed else "无")
+            say("  结论：只装了 %d/%d 个，建议 --guard install 重装。" % (len(alive), len(rows)))
+        return 0
+    if mode == "install":
+        ok, note = guard_install()
+        if ok:
+            say("守卫已装：每 30 分钟 + 每次登录，目标 %s" % GUARD_TARGETS)
+        else:
+            fail_msg("守卫没装全：%s" % (note or "原因不明"))
+        if note and ok:
+            say("  注意：%s" % note)
+        return 0 if ok else 1
+    if mode == "remove":
+        ok, note = guard_remove()
+        say(note)
+        if not ok:
+            fail_msg("有任务删不掉，可能需要管理员权限")
+        return 0 if ok else 1
+    fail_msg("--guard 只接受 install / remove / status")
+    return 2
 
 
-def _cron_install():
-    script = os.path.abspath(__file__)
-    line = "*/30 * * * * %s %s --apply --quiet --yes # %s" % (sys.executable, script, TASK_REFRESH)
-    rc, out = _run(["crontab", "-l"])
-    lines = [l for l in out.splitlines() if script not in l and TASK_REFRESH not in l]
-    lines.append(line)
-    tmp = os.path.join(STATE_DIR, "_crontab.txt")
-    try:
-        os.makedirs(STATE_DIR, exist_ok=True)
-        with open(tmp, "w", encoding="utf-8") as fh:
-            fh.write("\n".join(lines) + "\n")
-        rc2, out2 = _run(["crontab", tmp])
-        remove_file(tmp)
-        if rc2 != 0:
-            return False, "写 crontab 失败：%s" % out2.strip()[:120]
-        return True, "已写入 crontab（每 30 分钟）"
-    except OSError as exc:
-        return False, "写 crontab 失败：%s" % exc
-
-
-def _cron_remove_one(name):
-    rc, out = _run(["crontab", "-l"])
-    if rc != 0:
-        return
-    lines = [l for l in out.splitlines() if name not in l and os.path.abspath(__file__) not in l]
-    tmp = os.path.join(STATE_DIR, "_crontab.txt")
-    try:
-        os.makedirs(STATE_DIR, exist_ok=True)
-        with open(tmp, "w", encoding="utf-8") as fh:
-            fh.write("\n".join(lines) + "\n")
-        _run(["crontab", tmp])
-        remove_file(tmp)
-    except OSError:
-        pass
-
-
-# ---------------------------------------------------------------------------
 # 10. 快照 / 对比
 # ---------------------------------------------------------------------------
 
@@ -5032,8 +5225,7 @@ def main(argv=None):
         say("--git-bash 不在本实现范围内（见 README 的边界一节）。")
         return 0
     if o.guard:
-        say("--guard 不在本实现范围内（见 README 的边界一节）。")
-        return 0
+        return do_guard(o.guard)
 
     return interactive_menu(ctx)
 
