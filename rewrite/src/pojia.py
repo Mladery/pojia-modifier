@@ -2112,6 +2112,17 @@ def restore_readonly(path):
 
 MEM_HEAD = "## Memory Block"
 MEM_TAG = "<!-- %s:MEM -->" % MARK
+MEM_SUFFIX = "_memory.md"
+MEM_VERSION = 999999            # 磁盘契约：旧版靠 >= 999999 判定「这是本工具写的」
+MEM_CAP = 10000
+MEM_MARKS = ("pojia-modifier cloudmem v", "pojia-yijiantong cloudmem v", MEM_TAG)
+
+
+def mem_is_ours(text):
+    """这一段是不是本工具写的。认自己的标记，也认旧版的两条标记串。"""
+    if not text:
+        return False
+    return any(m in text for m in MEM_MARKS)
 
 
 def mem_parse(text):
@@ -2142,12 +2153,12 @@ def mem_write(text, content, version=None):
     block = "%s\n%s\n" % (MEM_TAG, content.strip("\n"))
     if info and info["start"] >= 0:
         head = text[:info["start"]]
-        tail = text[info["end"]:]
-        out = head + "%s\n%s\n---" % (MEM_HEAD, block)
-        if tail.startswith("\n"):
+        tail = text[info["end"]:]          # 以 "\n---" 开头
+        out = head + MEM_HEAD + "\n" + block
+        if tail.startswith("\n---"):
             out += tail
         else:
-            out += "\n" + tail.lstrip("\n")
+            out += "\n---" + tail
     else:
         out = text.rstrip("\n")
         if out:
@@ -2165,13 +2176,70 @@ def mem_strip(text):
     if not info or info["start"] < 0:
         return text
     block = info["block"] or ""
-    if MARK not in block:
+    if not mem_is_ours(block):
         return text
     head = text[:info["start"]]
     tail = text[info["end"] + 4:] if text[info["end"]:info["end"] + 4] == "\n---" else text[info["end"]:]
     out = (head + tail).strip("\n")
     out = re.sub(r"^>\s*Version:.*\n?", "", out, count=1, flags=re.M)
     return out
+
+
+def cloudmem_files(data_dir):
+    """账号级云记忆档案：各数据目录下的 *_memory.md。
+
+    磁盘契约：文件名就是 <uid>_memory.md，备份是 <同路径>.pojia.bak，注入后置只读。
+    旧版写过的档案必须能被这里列出来，否则还原会漏。
+    """
+    roots = []
+    if data_dir:
+        roots.append(os.path.join(data_dir, "memory"))
+    roots.append(os.path.join(home(), ".workbuddy", "memory"))
+    roots.append(os.path.join(home(), ".workbuddy-ai", "memory"))
+    for env in ("APPDATA", "LOCALAPPDATA"):
+        base = os.environ.get(env)
+        if base:
+            roots.append(os.path.join(base, "WorkBuddy", "memory"))
+
+    out = []
+    seen_dir = set()
+    seen_file = set()
+    for d in roots:
+        if not d or not os.path.isdir(long_path(d)):
+            continue
+        dk = norm(d)
+        if dk in seen_dir:
+            continue
+        seen_dir.add(dk)
+        try:
+            names = os.listdir(long_path(d))
+        except OSError:
+            continue
+        for n in names:
+            if not n.endswith(MEM_SUFFIX):
+                continue
+            path = os.path.join(d, n)
+            fk = norm(path)
+            if fk in seen_file or not os.path.isfile(long_path(path)):
+                continue
+            seen_file.add(fk)
+            out.append(path)
+    return sorted(out)
+
+
+def cloudmem_rows(data_dir):
+    """只读：每份档案一行 (名字, 正文字符数, 只读, 是不是本工具写的)。"""
+    rows = []
+    for path in cloudmem_files(data_dir):
+        text = read_strict(path)
+        info = mem_parse(text) if text is not None else None
+        block = (info or {}).get("block") or ""
+        try:
+            readonly = not bool(os.stat(long_path(path)).st_mode & 0o200)
+        except OSError:
+            readonly = False
+        rows.append((os.path.basename(path), len(block), readonly, mem_is_ours(text)))
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -2688,19 +2756,25 @@ def _prepare(path, tgt, root, existed):
 
 
 def _apply_memory(ctx, tgt, path, payload):
-    text = read_strict(path)
+    """账号级云记忆。只替换 Memory Block 段，文件其余部分逐字保留。"""
+    body = payload or assemble(ctx.persona, tgt.key)
+    if len(body) > MEM_CAP:
+        return (False, False, "人格 %d 字超过云记忆上限 %d，已跳过（可精简 persona.md）"
+                % (len(body), MEM_CAP))
+    text, bom, eol = read_or_default(path)
     if text is None:
-        text = ""
+        return (False, False, "读不到内容，已跳过（不覆盖）：%s" % path)
     if OPT["dry"]:
-        say("[预演] %s：会写云记忆 %s" % (tgt.name, path))
+        say("[预演] %s：会写云记忆 %s（%d 字）" % (tgt.name, path, len(body)))
         return (True, True, "预演")
-    ro = False
-    if os.path.exists(long_path(path)):
-        ro = clear_readonly(path)
-    new = mem_write(text, payload or assemble(ctx.persona, tgt.key), VERSION)
+    ensure_backup(path, tgt.bak_suffix, "")
+    ro = clear_readonly(path) if os.path.exists(long_path(path)) else False
+    new = mem_write(text, body, MEM_VERSION)
     if not ensure_dir(os.path.dirname(os.path.abspath(path))):
+        if ro:
+            restore_readonly(path)
         return (False, False, "建不了目录")
-    ok = write_bytes_checked(path, encode_text(new, False, "\n"))
+    ok = write_bytes_checked(path, encode_text(new, bom, eol))
     if ro:
         restore_readonly(path)
     if not ok:
@@ -3044,6 +3118,9 @@ class WorkBuddyTarget(BlockTarget):
                                  lambda p: self.is_install(p) and self.is_intl(p) == (self.key == "wbintl"))
             if got:
                 return got, "深度遍历", tried
+        got = self.from_shortcut()
+        if got:
+            return got, "快捷方式", tried
         return "", "", tried
 
     def resolve_data(self, explicit=""):
@@ -3086,8 +3163,8 @@ class WorkBuddyTarget(BlockTarget):
         out = [(p, "block", None) for p in self.templates(root)]
         data = getattr(self, "data_root", "")
         if data:
-            out.append((os.path.join(data, "memory", "account-memory.md"), "memory",
-                        assemble(ctx.persona, self.key)))
+            for p in cloudmem_files(data):
+                out.append((p, "memory", assemble(ctx.persona, self.key)))
             plug = os.path.join(data, "plugins")
             if os.path.isdir(plug):
                 for dirpath, _dn, filenames in os.walk(plug):
@@ -3117,9 +3194,14 @@ class WorkBuddyTarget(BlockTarget):
         return tpls[0] if tpls else ""
 
     def status(self, root, ctx):
+        mem = cloudmem_rows(getattr(self, "data_root", ""))
+        tail = ""
+        if mem:
+            mine = sum(1 for r in mem if r[3])
+            tail = "；云记忆 %d 份，%d 份已注入" % (len(mem), mine)
         tpls = self.templates(root)
         if not tpls:
-            return "未安装", "没有可注入的模板"
+            return "未安装", "没有可注入的模板" + tail
         cur = 0
         injected = 0
         for p in tpls:
@@ -3129,10 +3211,10 @@ class WorkBuddyTarget(BlockTarget):
                 if detect_state(text, ctx.hash) == "current":
                     cur += 1
         if not injected:
-            return "严格态", "0/%d 份模板已注入" % len(tpls)
+            return "严格态", "0/%d 份模板已注入%s" % (len(tpls), tail)
         if cur == len(tpls):
-            return "宽松态·当前", "%d/%d 份" % (cur, len(tpls))
-        return "宽松态·过期", "%d/%d 份为当前" % (cur, len(tpls))
+            return "宽松态·当前", "%d/%d 份%s" % (cur, len(tpls), tail)
+        return "宽松态·过期", "%d/%d 份为当前%s" % (cur, len(tpls), tail)
 
 
 class WorkBuddyIntlTarget(WorkBuddyTarget):
