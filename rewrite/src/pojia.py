@@ -836,20 +836,28 @@ VAULT_LEGACY = "pojia-yijiantong"
 VAULT_APP = "pojia-modifier"
 
 
-def vault_dir(config_root):
-    """仓库目录。老名字还在、新名字还没有时顺手改名，失败就退回老路径。"""
+def owned_dir(config_root):
+    """<配置根>/managed-prompts/pojia-modifier。老名字还在、新名字还没有时顺手改名。
+
+    技能清单和备份仓库都挂在它下面，所以改名只做一次：谁先调用谁负责搬。
+    """
     if not config_root:
         return ""
     base = os.path.join(config_root, VAULT_OWNER)
-    new = os.path.join(base, VAULT_APP, VAULT_DIRNAME)
-    old = os.path.join(base, VAULT_LEGACY, VAULT_DIRNAME)
+    new = os.path.join(base, VAULT_APP)
+    old = os.path.join(base, VAULT_LEGACY)
     if not os.path.isdir(long_path(new)) and os.path.isdir(long_path(old)):
         try:
-            os.makedirs(long_path(os.path.dirname(new)), exist_ok=True)
             os.replace(long_path(old), long_path(new))
         except OSError:
             return old
     return new
+
+
+def vault_dir(config_root):
+    """仓库目录。老名字还在、新名字还没有时顺手改名，失败就退回老路径。"""
+    owned = owned_dir(config_root)
+    return os.path.join(owned, VAULT_DIRNAME) if owned else ""
 
 
 def vault_key(path):
@@ -910,6 +918,157 @@ def vault_stash(tgt, path):
     data = read_bytes(backup_path(path, tgt.bak_suffix))
     if data is not None:
         vault_put(vroot, path, data)
+
+
+# --------------------------------------------------------------- 内置技能
+#
+# 技能是目录树，没法在文件里塞标记（会把 SKILL.md 弄脏），所以用清单记归属：
+#   <配置根>/managed-prompts/pojia-modifier/zcode-skills.json
+#   {"paths": {"skills/foo": {"sha": "<16 位>"}}}
+# 清单的文件名与结构是磁盘契约：老版本装过的技能靠它才删得掉，改名就会重复装一遍。
+
+SKILL_ROOTS = ("skills", os.path.join(".agents", "skills"))
+SKILL_LEDGER = "zcode-skills.json"
+
+
+def skill_src():
+    """内置技能源：脚本旁边的 skills/。没随包带就是没带，跳过不报错。"""
+    folder = os.path.join(SCRIPT_DIR, "skills")
+    return folder if os.path.isdir(long_path(folder)) else ""
+
+
+def tree_sha(folder):
+    """整棵树的指纹：相对路径 + 每个文件的 sha256。算不出来给空串。"""
+    acc = hashlib.sha256()
+    try:
+        for base, dirs, files in os.walk(long_path(folder)):
+            dirs.sort()
+            for name in sorted(files):
+                full = os.path.join(base, name)
+                rel = os.path.relpath(full, folder).replace("\\", "/")
+                acc.update(rel.encode("utf-8"))
+                acc.update((sha256_file(full) or "").encode("ascii"))
+    except (OSError, ValueError):
+        return ""
+    return acc.hexdigest()[:16]
+
+
+class SkillStore(object):
+    """把内置技能装进目标配置目录，并记住装过哪些。
+
+    三层判断，缺一层就会误删别人的东西：
+      1. 目标不存在 → 可以装；
+      2. 目标存在、清单里没有 → 别人的技能，跳过并说明；
+      3. 清单里有、但指纹和装的时候不一样 → 用户改过，保留不动。
+    """
+
+    def __init__(self, config_root, roots=SKILL_ROOTS, ledger=SKILL_LEDGER):
+        self.root = config_root or ""
+        self.owned = owned_dir(self.root)
+        self.roots = tuple(roots)
+        self.ledger = os.path.join(self.owned, ledger) if self.owned else ""
+
+    def load(self):
+        data = load_json(self.ledger, {}) if self.ledger else {}
+        paths = data.get("paths") if isinstance(data, dict) else None
+        return dict(paths) if isinstance(paths, dict) else {}
+
+    def save(self, paths):
+        if not self.ledger:
+            return False
+        return save_json(self.ledger, {"paths": paths})
+
+    def forget(self):
+        if self.ledger:
+            remove_file(self.ledger)
+
+    def count(self):
+        return len(self.load())
+
+    def _claimable(self, dst, rel, paths):
+        """能装就返回空串，不能装就返回一句人话。"""
+        if not os.path.exists(long_path(dst)):
+            return ""
+        if rel not in paths:
+            return "已存在且不是本工具装的，没动"
+        was = (paths.get(rel) or {}).get("sha", "")
+        now = tree_sha(dst)
+        if was and now and was != now:
+            return "本工具装过，但内容被改过，保留不动"
+        return ""
+
+    def sync(self, source, dry=False):
+        """-> (装了几个, 提示行)。源缺失时返回 (0, [说明])，不抛。"""
+        if not source or not os.path.isdir(long_path(source)):
+            return 0, ["没有内置技能源（%s），跳过技能" % (source or "空")]
+        try:
+            names = sorted(n for n in os.listdir(long_path(source))
+                           if os.path.isfile(long_path(os.path.join(source, n, "SKILL.md"))))
+        except OSError:
+            return 0, ["技能源读不进来，跳过"]
+        if not names:
+            return 0, ["技能源里没有 <名字>/SKILL.md，跳过"]
+        paths = self.load()
+        planted, skipped = 0, []
+        for root_rel in self.roots:
+            for name in names:
+                rel = "%s/%s" % (root_rel.replace("\\", "/"), name)
+                dst = os.path.join(self.root, root_rel, name)
+                why = self._claimable(dst, rel, paths)
+                if why:
+                    skipped.append("%s（%s）" % (rel, why))
+                    continue
+                if dry:
+                    planted += 1
+                    continue
+                try:
+                    if os.path.isdir(long_path(dst)):
+                        shutil.rmtree(long_path(dst))
+                    shutil.copytree(long_path(os.path.join(source, name)), long_path(dst))
+                except OSError as exc:
+                    skipped.append("%s（复制失败：%s）" % (rel, exc))
+                    continue
+                planted += 1
+                paths[rel] = {"sha": tree_sha(dst)}
+        if planted and not dry:
+            self.save(paths)
+        note = "技能 %d 个已装到 %s" % (planted, "、".join(self.roots))
+        if skipped:
+            note += "（跳过 %d 个）" % len(skipped)
+        return planted, [note] + skipped[:5]
+
+    def purge(self, dry=False):
+        """只删清单里记着、且没被改过的那几棵。返回删了几个。"""
+        paths = self.load()
+        gone = 0
+        for rel in sorted(paths):
+            meta = paths.get(rel) or {}
+            dst = os.path.join(self.root, *rel.replace("\\", "/").split("/"))
+            if not os.path.isdir(long_path(dst)):
+                continue
+            was = meta.get("sha", "")
+            now = tree_sha(dst)
+            if was and now and was != now:
+                continue
+            if not dry:
+                shutil.rmtree(long_path(dst), ignore_errors=True)
+                self._trim(dst)
+            gone += 1
+        if not dry:
+            self.forget()
+        return gone
+
+    def _trim(self, dst):
+        """技能删完以后，把本工具建的空目录收掉（只收上面那一层，不往上爬）。"""
+        parent = os.path.dirname(dst)
+        rel = os.path.relpath(parent, self.root).replace("\\", "/")
+        if rel not in [r.replace("\\", "/") for r in self.roots]:
+            return
+        try:
+            if not os.listdir(long_path(parent)):
+                os.rmdir(long_path(parent))
+        except OSError:
+            pass
 
 
 # --------------------------------------------------------------- 状态文件
@@ -2518,6 +2677,10 @@ class Target(object):
         """注入成功后的收尾。默认什么都不做。"""
         return
 
+    def after_revert(self, root):
+        """撤回成功后的收尾。默认什么都不做。"""
+        return
+
     def main_path(self, root):
         return os.path.join(root, self.instr) if self.instr else ""
 
@@ -3319,6 +3482,21 @@ class ZcodeTarget(WholeTarget):
         if not root or not os.path.isdir(root):
             return False
         return True
+
+    def skill_store(self, root):
+        return SkillStore(root)
+
+    def after_apply(self, root):
+        n, notes = self.skill_store(root).sync(skill_src())
+        if n:
+            say("  [技能] %-12s 装了 %d 个内置技能" % (self.key, n))
+        for line in notes[:3]:
+            say("  [技能] %-12s %s" % (self.key, line))
+
+    def after_revert(self, root):
+        n = self.skill_store(root).purge()
+        if n:
+            say("  [技能] %-12s 收回 %d 个内置技能" % (self.key, n))
 
 
 # --------------------------------------------------------------- WorkBuddy
@@ -4864,6 +5042,8 @@ def do_revert(ctx, targets):
         if res.ok:
             ok += 1
             say("  [完成] %-12s %s" % (t.key, res.msg))
+            if res.status != "dry":
+                t.after_revert(root)
         else:
             failed += 1
             fail_msg("%-12s %s" % (t.key, res.msg))
