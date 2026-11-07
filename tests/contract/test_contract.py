@@ -74,6 +74,20 @@ def test_c2_help_lists_every_target_dir_flag(box):
     assert not missing, "缺这些目标的目录参数：%s" % missing
 
 
+def test_c2_choice_sets_are_stable(box):
+    """同名开关的取值集合不能变。变了就是「同名不同义」，GUI 和脚本会静默失效。"""
+    text = box.out(box.run("--help"))
+    for want in ("{inject,preset}", "{install,remove,status}", "{auto,on,off}"):
+        assert want in text, "取值集合漂了：%s" % want
+
+
+def test_c2_choice_sets_are_stable(box):
+    """同名开关的取值集合不能变。变了就是「同名不同义」，GUI 和脚本会静默失效。"""
+    text = box.out(box.run("--help"))
+    for want in ("{inject,preset}", "{install,remove,status}", "{auto,on,off}"):
+        assert want in text, "取值集合漂了：%s" % want
+
+
 # --------------------------------------------------------- C3 只读不落盘
 
 @pytest.mark.parametrize("argv", [
@@ -283,11 +297,6 @@ def test_c12_recognizes_legacy_hash_headers(box, header):
 
 # ------------------------------------------------- 已知偏差（新实现应修）
 
-@pytest.mark.xfail(strict=True, reason=(
-    "已知残留：--revert 之后会留下 *.pojia.bak（备份，设计如此）、"
-    "settings.json（Claude 的空壳 {}）与 output-styles/（空目录）。"
-    "备份是有意的，后两条是残留。新实现应当清掉后两条——清了之后本测试会 xpass，"
-    "把 xfail 标记删掉即可。"))
 def test_revert_leaves_no_residue(box):
     d = box.target("resid")
     open(os.path.join(d, "CLAUDE.md"), "wb").write(CLAUDE_SAMPLE)

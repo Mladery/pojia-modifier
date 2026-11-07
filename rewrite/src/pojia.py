@@ -31,6 +31,7 @@ import os
 import re
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import time
@@ -103,6 +104,9 @@ OPT = {
     "yes": False,
     "deep": False,
     "verbose": False,
+    "clean_spill": False,
+    "purge_spill": False,
+    "keep_cache": False,
 }
 
 _CTX = {
@@ -814,6 +818,98 @@ def archive_backup(bak, archive_dir, reason):
         shutil.copy2(long_path(bak), long_path(dst))
     except OSError:
         pass
+
+
+# --------------------------------------------------------------- 备份仓库
+#
+# 磁盘契约（旧版本写过的东西必须读得出来，一个字节都不能改）：
+#   <配置根>/managed-prompts/pojia-modifier/pristine/<20 位 sha1>.bin
+#   <配置根>/managed-prompts/pojia-modifier/pristine/index.json
+# 键算法 = sha1(normcase(abspath(path)))[:20]。改算法 = 老仓库全部失效。
+#
+# 为什么在 .bak 之外再存一份：DSH 自动更新会把 resources/app 整个换掉，
+# .bak 跟着没了；仓库在用户配置目录下，更新不动它。
+
+VAULT_OWNER = "managed-prompts"
+VAULT_DIRNAME = "pristine"
+VAULT_LEGACY = "pojia-yijiantong"
+VAULT_APP = "pojia-modifier"
+
+
+def vault_dir(config_root):
+    """仓库目录。老名字还在、新名字还没有时顺手改名，失败就退回老路径。"""
+    if not config_root:
+        return ""
+    base = os.path.join(config_root, VAULT_OWNER)
+    new = os.path.join(base, VAULT_APP, VAULT_DIRNAME)
+    old = os.path.join(base, VAULT_LEGACY, VAULT_DIRNAME)
+    if not os.path.isdir(long_path(new)) and os.path.isdir(long_path(old)):
+        try:
+            os.makedirs(long_path(os.path.dirname(new)), exist_ok=True)
+            os.replace(long_path(old), long_path(new))
+        except OSError:
+            return old
+    return new
+
+
+def vault_key(path):
+    text = os.path.normcase(os.path.abspath(path))
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:20]
+
+
+def vault_put(vroot, path, data):
+    """存一份原文。失败返回空串，不抛——备份是尽力而为，不许挡住主流程。"""
+    if not vroot or not path or data is None:
+        return ""
+    try:
+        if not ensure_dir(vroot):
+            return ""
+        key = vault_key(path)
+        out = os.path.join(vroot, key + ".bin")
+        if not atomic_write(out, data):
+            return ""
+        idx = os.path.join(vroot, "index.json")
+        table = load_json(idx, {})
+        table[key] = {"path": os.path.abspath(path), "size": len(data),
+                      "time": now_iso()}
+        save_json(idx, table)
+        return out
+    except (OSError, ValueError):
+        return ""
+
+
+def vault_get(vroot, path):
+    """取原文。没有就给 None（空文件与"没有"必须区分开）。"""
+    if not vroot or not path:
+        return None
+    return read_bytes(os.path.join(vroot, vault_key(path) + ".bin"))
+
+
+def vault_count(vroot):
+    if not vroot or not os.path.isdir(long_path(vroot)):
+        return 0
+    try:
+        return len([n for n in os.listdir(long_path(vroot)) if n.endswith(".bin")])
+    except OSError:
+        return 0
+
+
+def vault_restore(vroot, path):
+    """从仓库整文件还原。走字节写，不解码。"""
+    data = vault_get(vroot, path)
+    if data is None:
+        return False
+    return write_bytes_checked(path, data)
+
+
+def vault_stash(tgt, path):
+    """把刚做好的 .bak 再存一份进仓库。目标没有仓库时什么都不做。"""
+    vroot = tgt.vault_root()
+    if not vroot:
+        return
+    data = read_bytes(backup_path(path, tgt.bak_suffix))
+    if data is not None:
+        vault_put(vroot, path, data)
 
 
 # --------------------------------------------------------------- 状态文件
@@ -1659,6 +1755,189 @@ def normalize_picked(path, default_names, templates, valid):
 
 
 # ---------------------------------------------------------------------------
+# 5.5 快捷方式反查（本项目新增，8.13 之后）
+#
+# 大量 Electron 应用不往注册表写 InstallLocation，注册表这条路直接空手。
+# 快捷方式里的 LinkInfo 是唯一可靠的线索。全程只读，解不出来就跳过，
+# 绝不抛异常——定位阶段任何一处抛异常都会让整条兜底链断掉。
+# ---------------------------------------------------------------------------
+
+def _cstr_at(data, off, wide=False):
+    """从一段二进制里取 NUL 结尾的字符串。偏移非法时给空串。"""
+    if not data or off <= 0 or off >= len(data):
+        return ""
+    if wide:
+        end = off
+        while end + 1 < len(data) and data[end:end + 2] != b"\x00\x00":
+            end += 2
+        return data[off:end].decode("utf-16-le", "ignore")
+    end = data.find(b"\x00", off)
+    if end < 0:
+        return ""
+    return data[off:end].decode("mbcs" if IS_WIN else "utf-8", "ignore")
+
+
+def shortcut_target(path):
+    """读 .lnk 的目标路径。给绝对路径或空串，从不抛异常。
+
+    结构：76 字节头 -> [LinkTargetIDList] -> [LinkInfo] -> [StringData]
+          -> 若干可选块（含 EnvironmentVariableDataBlock，常写成 %ProgramFiles% 形式）。
+    只认 LinkInfo 的 LocalBasePath(-Unicode) 与环境变量块，其余块一律跳过。
+    """
+    data = read_bytes(path)
+    if not data or len(data) < 76 or data[:4] != b"L\x00\x00\x00":
+        return ""
+    try:
+        flags = struct.unpack_from("<I", data, 20)[0]
+    except struct.error:
+        return ""
+
+    pos = 76
+    if flags & 0x1:                                  # 有 IDList，跳过
+        try:
+            pos += 2 + struct.unpack_from("<H", data, pos)[0]
+        except struct.error:
+            return ""
+
+    base = suffix = ""
+    if flags & 0x2 and pos + 28 <= len(data):        # 有 LinkInfo
+        li = pos
+        try:
+            size, head = struct.unpack_from("<II", data, li)
+            base_off = struct.unpack_from("<I", data, li + 16)[0]
+            suffix_off = struct.unpack_from("<I", data, li + 24)[0]
+            if base_off:
+                base = _cstr_at(data, li + base_off)
+            if suffix_off:
+                suffix = _cstr_at(data, li + suffix_off)
+            if head >= 0x24:                         # Unicode 字段存在时优先
+                ubase = struct.unpack_from("<I", data, li + 28)[0]
+                usuffix = struct.unpack_from("<I", data, li + 32)[0]
+                if ubase:
+                    base = _cstr_at(data, li + ubase, wide=True) or base
+                if usuffix:
+                    suffix = _cstr_at(data, li + usuffix, wide=True) or suffix
+            if size > 0:
+                pos = li + size
+        except struct.error:
+            pass
+
+    workdir = relpath = ""
+    for bit, which in ((0x4, "name"), (0x8, "rel"), (0x10, "wd")):
+        if not (flags & bit):
+            continue
+        if pos + 2 > len(data):
+            break
+        try:
+            count = struct.unpack_from("<H", data, pos)[0]
+        except struct.error:
+            break
+        pos += 2
+        if flags & 0x80:                             # 整段 Unicode
+            chunk = data[pos:pos + count * 2]
+            pos += count * 2
+            text = chunk.decode("utf-16-le", "ignore")
+        else:
+            chunk = data[pos:pos + count]
+            pos += count
+            text = chunk.decode("mbcs" if IS_WIN else "utf-8", "ignore")
+        if which == "wd":
+            workdir = text
+        elif which == "rel":
+            relpath = text
+
+    env_path = ""
+    q = pos
+    while q + 8 <= len(data):
+        try:
+            sig, block = struct.unpack_from("<II", data, q)
+        except struct.error:
+            break
+        if sig == 0 or block < 4 or q + block > len(data):
+            break
+        if sig == 0xA0000001 and block >= 0x314:     # EnvironmentVariableDataBlock
+            wide = data[q + 268:q + 268 + 520].decode("utf-16-le", "ignore")
+            env_path = wide.split("\x00")[0]
+            if not env_path:
+                env_path = data[q + 8:q + 268].split(b"\x00")[0].decode(
+                    "mbcs" if IS_WIN else "utf-8", "ignore")
+        q += block
+
+    for cand in (base + suffix, env_path):
+        if cand:
+            full = expand(cand)
+            if os.path.isabs(full):
+                return full
+    if workdir and relpath:
+        return os.path.normpath(os.path.join(expand(workdir), relpath))
+    return ""
+
+
+def known_folder(name, default=""):
+    """读用户 shell 文件夹。取不到、含未展开变量、目录不存在，一律退回默认值。"""
+    if not IS_WIN:
+        return default
+    try:
+        import winreg
+    except ImportError:
+        return default
+    subs = (r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders",
+            r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders")
+    for sub in subs:
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, sub) as key:
+                value = winreg.QueryValueEx(key, name)[0]
+        except (OSError, ValueError):
+            continue
+        if not isinstance(value, str) or not value.strip():
+            continue
+        path = expand(value.strip())
+        if "%" in path or not os.path.isdir(path):
+            continue
+        return os.path.normpath(path)
+    return default
+
+
+def shortcut_files(limit=1500):
+    """开始菜单（用户 + 全局，最多 3 层）与桌面上的 .lnk。去重，超限就停。"""
+    if not IS_WIN:
+        return []
+    roots = []
+    for env in ("APPDATA", "ProgramData"):
+        base = os.environ.get(env)
+        if base:
+            roots.append(os.path.join(base, "Microsoft", "Windows", "Start Menu", "Programs"))
+    programs = known_folder("Programs")
+    if programs:
+        roots.append(programs)
+    public = os.environ.get("PUBLIC")
+    for desk in (known_folder("Desktop"),
+                 os.path.join(home(), "Desktop"),
+                 os.path.join(public, "Desktop") if public else ""):
+        if desk:
+            roots.append(desk)
+
+    seen = set()
+    out = []
+    for root in roots:
+        if not root or not os.path.isdir(root):
+            continue
+        key = norm(root)
+        if key in seen:
+            continue
+        seen.add(key)
+        for dirpath, dirnames, filenames in os.walk(root):
+            if dirpath[len(root):].count(os.sep) >= 3:
+                dirnames[:] = []
+            for fn in filenames:
+                if fn.lower().endswith(".lnk"):
+                    out.append(os.path.join(dirpath, fn))
+                    if len(out) >= limit:
+                        return out
+    return out
+
+
+# ---------------------------------------------------------------------------
 # 6. 注入层
 # ---------------------------------------------------------------------------
 
@@ -1938,6 +2217,14 @@ class Target(object):
                 return True
         return False
 
+    def vault_root(self):
+        """备份仓库目录。默认没有仓库；只有会整体替换文件的目标才需要。"""
+        return ""
+
+    def after_apply(self, root):
+        """注入成功后的收尾。默认什么都不做。"""
+        return
+
     def main_path(self, root):
         return os.path.join(root, self.instr) if self.instr else ""
 
@@ -1989,6 +2276,9 @@ class Target(object):
         for r in registry_roots(self.registry_hints or [self.name]):
             if self.is_valid(r):
                 return r, "注册表", tried
+        got = self.from_shortcut()
+        if got:
+            return got, "快捷方式", tried
         return "", "", tried
 
     def from_process(self):
@@ -2009,6 +2299,56 @@ class Target(object):
             for token in _cmd_paths(cmd):
                 if os.path.isdir(token) and self.is_valid(token):
                     return token
+        return ""
+
+    def from_shortcut(self):
+        """开始菜单/桌面的快捷方式反查安装根。注册表之外的第二个来源。
+
+        命中条件放宽到「exe 名」或「所在目录名」任一相等——DSH 这类快捷方式的
+        目标叫 DeepSeek Harness.exe，靠 exe 名永远对不上，但目录就叫 DSH。
+        """
+        if not IS_WIN:
+            return ""
+        names = []
+        for n in tuple(self.procs) + ((self.exe,) if self.exe else ()):
+            if not n:
+                continue
+            n = n.lower()
+            if n.endswith(".exe"):
+                n = n[:-4]
+            names.append(n)
+        if not names:
+            return ""
+        generic = ("programs", "program files", "program files (x86)", "local",
+                   "roaming", "appdata", "users", "desktop", "start menu", "bin",
+                   "common files", "windows")
+        for lnk in shortcut_files():
+            target = shortcut_target(lnk)
+            if not target:
+                continue
+            folder = os.path.dirname(target)
+            stem = os.path.basename(target).lower()
+            if stem.endswith(".exe"):
+                stem = stem[:-4]
+            base = os.path.basename(folder).lower()
+            if stem in names:
+                start, steps = folder, 4        # 按 exe 名命中：允许往上找安装根
+            elif base in names:
+                start, steps = folder, 1        # 按目录名命中：目录本身就是候选
+            else:
+                continue
+            cur = start
+            for _ in range(steps):
+                if not cur or not os.path.isdir(cur):
+                    break
+                if os.path.basename(cur).lower() in generic:
+                    break
+                if self.is_valid(cur):
+                    return cur
+                up = os.path.dirname(cur)
+                if not up or up == cur:
+                    break
+                cur = up
         return ""
 
     def not_found(self, tried):
@@ -2343,6 +2683,7 @@ def _prepare(path, tgt, root, existed):
     if not ensure_dir(os.path.dirname(os.path.abspath(path))):
         return False
     ensure_backup(path, tgt.bak_suffix, os.path.join(root, PASSPORT_DIRNAME, "backups"))
+    vault_stash(tgt, path)
     return True
 
 
@@ -2377,6 +2718,9 @@ def revert_one(tgt, path, kind_tag, was_created):
     kind, _sep, key = str(kind_tag).partition(":")
     if backup_is_clean(path, tgt.bak_suffix):
         return restore_backup(path, tgt.bak_suffix)
+    vroot = tgt.vault_root()
+    if vroot and vault_restore(vroot, path):
+        return True
     text = read_strict(path)
     if text is None:
         return False
@@ -2757,6 +3101,17 @@ class WorkBuddyTarget(BlockTarget):
     def is_valid(self, root):
         return self.is_install(root)
 
+    def after_apply(self, root):
+        """删掉运行时缓存，逼下次启动按已注入的 product.json 重建。--keep-cache 可跳过。"""
+        if OPT["dry"] or OPT["keep_cache"]:
+            return
+        data = getattr(self, "data_root", "")
+        if not data:
+            return
+        cache = os.path.join(data, "cache", "acc-product-config-v3.json")
+        if os.path.isfile(long_path(cache)) and remove_file(cache):
+            say("  [清理] %-12s 运行时缓存已删（下次启动重建）" % self.key)
+
     def main_path(self, root):
         tpls = self.templates(root)
         return tpls[0] if tpls else ""
@@ -2818,6 +3173,9 @@ class DshTarget(Target):
 
     def is_valid(self, root):
         return self.is_install(root)
+
+    def vault_root(self):
+        return vault_dir(self.config_root())
 
     def resolve(self, explicit=""):
         tried = []
@@ -3551,6 +3909,207 @@ def do_compare(ctx, targets):
 
 
 # ---------------------------------------------------------------------------
+# 10.5 会话快照清理与泄密扫描（本项目新增，8.13 之后）
+#
+# 这些副本是产品自己留在 TEMP 和 <data>/cache 里的配置文件拷贝，里面有明文 API Key。
+# 默认只统计不删：它们不在备份范围内，删了 --revert 也找不回来。
+# ---------------------------------------------------------------------------
+
+SPILL_SECRET_PATTERNS = (
+    ("API Key", re.compile(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_\-]{16,}")),
+    ("Bearer 令牌", re.compile(r"Bearer\s+([A-Za-z0-9._\-]{20,})")),
+    ("JWT", re.compile(r"eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}")),
+    ("私钥块", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+)
+
+
+def spill_owner(path):
+    """从副本里读出它属于哪个产品（dataFolderName 字段）。读不到给空串。"""
+    files = []
+    if os.path.isdir(long_path(path)):
+        for base, _dirs, names in os.walk(long_path(path)):
+            files.extend(os.path.join(base, n) for n in names)
+            if files:
+                break
+    else:
+        files.append(path)
+    if not files:
+        return ""
+    head = read_bytes(files[0])
+    if not head:
+        return ""
+    hit = re.search(rb'"dataFolderName"\s*:\s*"([^"]*)"', head[:262144])
+    return hit.group(1).decode("utf-8", "replace") if hit else ""
+
+
+def spill_files(data_dir):
+    """TEMP 下的 workbuddy-product-spill-* 与 <data>/cache/conversation-product-spill。"""
+    items = []
+    want = os.path.basename((data_dir or "").rstrip("\\/"))
+    temp = os.environ.get("TEMP") or os.environ.get("TMP") or ""
+    if temp and os.path.isdir(long_path(temp)):
+        try:
+            for name in os.listdir(long_path(temp)):
+                if not name.startswith("workbuddy-product-spill-"):
+                    continue
+                p = os.path.join(temp, name)
+                owner = spill_owner(p)
+                if want and owner and owner != want:
+                    continue
+                items.append(p)
+        except OSError:
+            pass
+    cache = os.path.join(data_dir or "", "cache", "conversation-product-spill")
+    if data_dir and os.path.isdir(long_path(cache)):
+        try:
+            items += [os.path.join(cache, n) for n in os.listdir(long_path(cache))
+                      if n.endswith(".json")]
+        except OSError:
+            pass
+    return items
+
+
+def spill_scan_secrets(items, budget=3.0, max_files=120):
+    """扫副本里的明文凭证。-> (扫了几个, 总文件数, {(标签, 令牌): {...}})"""
+    files = []
+    for p in items:
+        if os.path.isdir(long_path(p)):
+            for base, _dirs, names in os.walk(long_path(p)):
+                files.extend(os.path.join(base, n) for n in names)
+        else:
+            files.append(p)
+    started = time.time()
+    scanned = 0
+    found = {}
+    for f in files:
+        if scanned >= max_files or time.time() - started > budget:
+            break
+        try:
+            if os.path.getsize(long_path(f)) > 8 * 1024 * 1024:
+                continue
+        except OSError:
+            continue
+        text = read_strict(f)
+        if not text:
+            continue
+        scanned += 1
+        for label, pattern in SPILL_SECRET_PATTERNS:
+            for hit in pattern.finditer(text):
+                token = hit.group(1) if hit.groups() else hit.group(0)
+                before = text[max(0, hit.start() - 600):hit.start()]
+                hosts = re.findall(r"https://([A-Za-z0-9.\-]+)", before)
+                slot = found.setdefault((label, token), {"count": 0, "files": set(),
+                                                         "host": hosts[-1] if hosts else ""})
+                slot["count"] += 1
+                slot["files"].add(f)
+    return scanned, len(files), found
+
+
+def spill_size(path):
+    try:
+        if os.path.isdir(long_path(path)):
+            total = 0
+            for base, _dirs, names in os.walk(long_path(path)):
+                for n in names:
+                    try:
+                        total += os.path.getsize(os.path.join(base, n))
+                    except OSError:
+                        pass
+            return total
+        return os.path.getsize(long_path(path))
+    except OSError:
+        return 0
+
+
+def spill_age_hours(path):
+    try:
+        return (time.time() - os.path.getmtime(long_path(path))) / 3600.0
+    except OSError:
+        return 0.0
+
+
+def spill_rows(data_dir, max_age_hours=24):
+    """只读：列现状。-> [(级别, 说明)]"""
+    items = spill_files(data_dir)
+    if not items:
+        return []
+    rows = []
+    old = [p for p in items if spill_age_hours(p) > max_age_hours]
+    total = sum(spill_size(p) for p in items)
+    rows.append(("info", "共 %d 份副本，%.1f MB；超过 %d 小时的 %d 份"
+                 % (len(items), total / 1048576.0, max_age_hours, len(old))))
+    _scanned, _total, found = spill_scan_secrets(items)
+    ranked = sorted(found.items(), key=lambda kv: -kv[1]["count"])[:8]
+    for (label, token), slot in ranked:
+        masked = (token[:6] + "…" + token[-4:]) if len(token) > 12 else "…"
+        rows.append(("warn", "明文 %s：%s（%d 处，%d 个文件%s）"
+                     % (label, masked, slot["count"], len(slot["files"]),
+                        "，来源 " + slot["host"] if slot["host"] else "")))
+    return rows
+
+
+def purge_spill(data_dir, max_age_hours=24, purge_all=False, dry=False):
+    """删副本。-> (份数, 字节数)。dry 时只统计不删。"""
+    count = size = 0
+    for p in spill_files(data_dir):
+        if not purge_all and spill_age_hours(p) <= max_age_hours:
+            continue
+        size += spill_size(p)
+        count += 1
+        if dry:
+            continue
+        try:
+            if os.path.isdir(long_path(p)):
+                shutil.rmtree(long_path(p), ignore_errors=True)
+            else:
+                os.remove(long_path(p))
+        except OSError:
+            pass
+    return count, size
+
+
+def do_clean_spill(targets):
+    """--clean-spill 只清过期；--purge-spill 全清；两个都不给就只统计。"""
+    purge = bool(OPT["purge_spill"])
+    clean = bool(OPT["clean_spill"])
+    total_n = total_sz = 0
+    for t in targets:
+        if not getattr(t, "data_rel", ""):
+            continue
+        data_dir = t.resolve_data(EXPLICIT.get(t.key + ".data", ""))
+        if not data_dir:
+            say("  %-16s 没找到数据目录，跳过" % t.key)
+            continue
+        if purge or clean:
+            n, sz = purge_spill(data_dir, 24, purge, OPT["dry"])
+            total_n += n
+            total_sz += sz
+            if n:
+                say("  %-16s %s %d 份（%.1f MB）"
+                    % (t.key, "[预演] 将清理" if OPT["dry"] else "已清理",
+                       n, sz / 1048576.0))
+            else:
+                say("  %-16s 没有符合条件的副本" % t.key)
+        else:
+            rows = spill_rows(data_dir)
+            if not rows:
+                say("  %-16s 没有副本" % t.key)
+            for level, note in rows:
+                say("  %-16s %s%s" % (t.key, "[注意] " if level == "warn" else "", note))
+    say("")
+    if purge or clean:
+        if total_n:
+            say("合计%s %d 份，%.1f MB（%s）"
+                % ("将清理" if OPT["dry"] else "清理", total_n, total_sz / 1048576.0,
+                   "全部，含未过期的" if purge else "24 小时以前的"))
+        else:
+            say("没有可清理的副本。")
+    else:
+        say("只统计，没有删。要清就明说：--clean-spill 只清过期那批，--purge-spill 全清。")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # 11. 菜单 / 图形界面
 # ---------------------------------------------------------------------------
 
@@ -3706,12 +4265,33 @@ def do_apply(ctx, targets):
         if res.ok and res.status in ("applied", "dry"):
             ok += 1
             say("  [完成] %-12s %s" % (t.key, res.msg))
+            if res.status == "applied":
+                t.after_apply(root)
         elif res.ok:
             skipped += 1
             say("  [跳过] %-12s %s" % (t.key, res.msg))
         else:
             failed += 1
             fail_msg("%-12s %s" % (t.key, res.msg))
+    if not OPT["dry"] and ok:
+        for t in targets:
+            if not getattr(t, "data_rel", ""):
+                continue
+            data = getattr(t, "data_root", "") or t.resolve_data(EXPLICIT.get(t.key + ".data", ""))
+            if not data:
+                continue
+            if OPT["purge_spill"] or OPT["clean_spill"]:
+                n, sz = purge_spill(data, 24, OPT["purge_spill"], False)
+                if n:
+                    say("  [清理] %-12s 会话副本 %d 份（%.1f MB）"
+                        % (t.key, n, sz / 1048576.0))
+            else:
+                rows = spill_rows(data)
+                for level, note in rows:
+                    say("  [%s] %-12s %s" % ("注意" if level == "warn" else "信息", t.key, note))
+                if rows:
+                    say("  本工具没有删它们：不在备份范围内，删了 --revert 也找不回来。"
+                        "要清就明说：--clean-spill 只清过期那批，--purge-spill 全清。")
     log_flush()
     say("")
     say("注入：成功 %d / 跳过 %d / 失败 %d" % (ok, skipped, failed))
@@ -3900,6 +4480,12 @@ def build_parser():
     a("--update", action="store_true", help="检查并更新自身")
     a("--uninstall", action="store_true", help="卸载（还原并保留状态与备份）")
     a("--purge", action="store_true", help="彻底清除（还原并删除状态目录）")
+    a("--clean-spill", dest="clean_spill", action="store_true",
+      help="只清 24 小时以前的过期会话副本（默认只统计不删）")
+    a("--purge-spill", dest="purge_spill", action="store_true",
+      help="清掉全部会话副本（含未过期的；不在备份范围内，删了还原不回来）")
+    a("--keep-cache", dest="keep_cache", action="store_true",
+      help="不删运行时缓存")
 
     a("--target", action="append", default=[], metavar="KEY",
       help="指定目标，可重复或逗号分隔；缺省为全部")
@@ -3941,13 +4527,17 @@ def build_parser():
     a("--persona-show", action="store_true", help="打印将要写入的完整文本")
     a("--persona-explain", action="store_true", help="解释哈希与文本构成")
 
-    a("--dsh-mode", dest="dsh_mode", default="auto", choices=["auto", "fuse", "no-fuse"],
-      help="DSH 的 Electron 保险丝处理方式")
+    a("--dsh-mode", dest="dsh_mode", default="inject", choices=["inject", "preset"],
+      help="DSH 破甲方式：inject=改磁盘文件（默认）；preset=只注册预设，不改官方文件")
+    a("--dsh-fuse", dest="dsh_fuse", default="auto", choices=["auto", "on", "off"],
+      help="DSH 的 Electron 保险丝（OnlyLoadAppFromAsar）怎么处理：auto=需要时自动关（默认）")
     a("--zpatch", action="store_true", help="同时改写 ZCode 的 zcode.cjs 系统提示词")
-    a("--mac-check", dest="mac_check", action="store_true", help="macOS 签名检查")
+    a("--mac-check", dest="mac_check", nargs="?", const="", metavar="APP",
+      help="macOS：检查 .app 的代码签名（不传路径就扫 /Applications 与 ~/Applications）")
     a("--resign", action="store_true", help="macOS 重签名")
     a("--git-bash", dest="git_bash", action="store_true", help="Git Bash 接管")
-    a("--guard", action="store_true", help="运行时守卫")
+    a("--guard", dest="guard", nargs="?", const="status",
+      choices=["install", "remove", "status"], help="运行时守卫：install / remove / status")
     a("--menu", action="store_true", help="进入交互菜单")
     a("--gui", action="store_true", help="进入图形界面")
     a("--version", action="store_true", help="显示版本")
@@ -3993,6 +4583,9 @@ def main(argv=None):
     OPT["yes"] = bool(o.yes)
     OPT["deep"] = bool(o.deep)
     OPT["zpatch"] = bool(o.zpatch)
+    OPT["clean_spill"] = bool(o.clean_spill)
+    OPT["purge_spill"] = bool(o.purge_spill)
+    OPT["keep_cache"] = bool(o.keep_cache)
     collect_explicit(o)
 
     if o.version:
@@ -4059,6 +4652,8 @@ def main(argv=None):
         return do_snapshot(ctx, targets)
     if o.compare:
         return do_compare(ctx, targets)
+    if o.clean_spill or o.purge_spill:
+        return do_clean_spill(targets)
 
     if o.apply:
         return do_apply(ctx, targets)
@@ -4073,7 +4668,7 @@ def main(argv=None):
     if o.update:
         say("%s %s：当前已是最新（离线校验，不联网）。" % (APP, DISPLAY_VERSION))
         return 0
-    if o.mac_check:
+    if o.mac_check is not None:
         if sys.platform == "darwin":
             say("macOS 签名检查：%s" % ("需要重签" if not is_admin() else "无法判定"))
         else:
