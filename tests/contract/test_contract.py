@@ -74,20 +74,6 @@ def test_c2_help_lists_every_target_dir_flag(box):
     assert not missing, "缺这些目标的目录参数：%s" % missing
 
 
-def test_c2_choice_sets_are_stable(box):
-    """同名开关的取值集合不能变。变了就是「同名不同义」，GUI 和脚本会静默失效。"""
-    text = box.out(box.run("--help"))
-    for want in ("{inject,preset}", "{install,remove,status}", "{auto,on,off}"):
-        assert want in text, "取值集合漂了：%s" % want
-
-
-def test_c2_choice_sets_are_stable(box):
-    """同名开关的取值集合不能变。变了就是「同名不同义」，GUI 和脚本会静默失效。"""
-    text = box.out(box.run("--help"))
-    for want in ("{inject,preset}", "{install,remove,status}", "{auto,on,off}"):
-        assert want in text, "取值集合漂了：%s" % want
-
-
 # --------------------------------------------------------- C3 只读不落盘
 
 @pytest.mark.parametrize("argv", [

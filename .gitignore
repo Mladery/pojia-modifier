@@ -84,3 +84,6 @@ dist/
 # GitHub API 临时响应：查 Release / CI 时 curl 落的隐藏点文件，属中间产物
 .r*.json
 .p*.json
+
+# pytest --basetemp 产物
+/.pt*/

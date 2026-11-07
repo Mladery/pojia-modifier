@@ -1,0 +1,575 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 固定版本：换 PyInstaller 版本会改变产物行为（引导器、onefile 解包方式），
+  # 出问题时要能确定是"代码改了"还是"打包器变了"。
+  PYINSTALLER_VERSION: "6.16.0"
+  # Cython 也钉版本：它生成的 C 代码随版本变，同一个 .py 换个 Cython 就可能编译不过。
+  CYTHON_VERSION: "3.1.4"
+  BIN_NAME: pojia-modifier
+
+jobs:
+  build:
+    name: ${{ matrix.asset }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # 四种产物覆盖绝大多数人：Windows x64、Linux x64、Intel Mac、Apple Silicon Mac。
+        # Intel Mac 用 macos-15-intel —— macos-13 已经不在受支持列表里（GitHub 现在只
+        # 提供 macos-15-intel / macos-26-intel 两个 x64 镜像），留着它会在队列里躺几十分钟。
+        include:
+          - { os: windows-latest,  py: "3.11", asset: windows-x64, ext: ".exe" }
+          - { os: ubuntu-latest,   py: "3.11", asset: linux-x64,   ext: ""     }
+          - { os: macos-15-intel,  py: "3.11", asset: macos-x64,   ext: ""     }
+          - { os: macos-latest,    py: "3.11", asset: macos-arm64, ext: ""     }
+
+    env:
+      # Windows runner 的控制台编码是 cp1252/cp936。冒烟步骤要打印产物的
+      # --version 输出（含中文），不强制 UTF-8 会直接 UnicodeEncodeError ——
+      # 第一次跑就栽在这儿，产物本身是好的，是打印炸了。
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.py }}
+
+      - name: 安装打包工具
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "pyinstaller==${{ env.PYINSTALLER_VERSION }}"
+          # Cython 装不上不该让发布变红 —— tools/build_exe.py 会自动退回纯源码打包。
+          python -m pip install "cython==${{ env.CYTHON_VERSION }}" || echo "::warning::Cython 装不上，本次产物走纯源码打包"
+
+      - name: 打包
+        shell: bash
+        run: |
+          # 构建产物全部落在 build/ 下（已 gitignore），仓库根目录保持干净。
+          # 具体参数在 tools/build_exe.py 里 —— --add-data 的分隔符（Windows ; / POSIX :）
+          # 和 Cython 那几步都不适合写在 YAML 里。specpath 必须和源码同盘：PyInstaller
+          # 用 relpath 算相对路径，跨盘符直接 ValueError（本机踩过）。
+          python tools/build_exe.py --name "$BIN_NAME"
+          ls -lh "build/dist/$BIN_NAME${{ matrix.ext }}"
+
+      - name: 签名（Windows，配了证书才签）
+        if: matrix.asset == 'windows-x64'
+        shell: pwsh
+        env:
+          PFX_B64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          PFX_PW: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: |
+          # 没配证书就跳过 —— 产物照样能用，只是属性页显示「未知发布者」。
+          if (-not $env:PFX_B64) {
+            Write-Host "::notice::没有配置 WINDOWS_SIGNING_PFX_BASE64，跳过签名"
+            exit 0
+          }
+          $dir = Join-Path $env:RUNNER_TEMP "signing"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $pfx = Join-Path $dir "pojia-signing.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX_B64))
+          # 密码走文件而不是命令行参数：进程参数在 runner 上对任何进程可见。
+          [IO.File]::WriteAllText(
+            (Join-Path $dir "pojia-signing-密码.txt"),
+            $env:PFX_PW,
+            (New-Object System.Text.UTF8Encoding($false)))
+
+          # 调仓库里的脚本，不在这里重写一遍 signtool 查找逻辑 —— 用户本机跑的是
+          # 它，CI 跑的也该是它。signtool 不在 PATH 上是常态，脚本里会去找 Windows Kits。
+          & .\tools\sign-windows.ps1 -Exe "build/dist/pojia-modifier.exe" -Pfx $pfx
+          if ($LASTEXITCODE -ne 0) { throw "签名失败（sign-windows.ps1 退出码 $LASTEXITCODE）" }
+
+          # 用仓库里那份验签脚本，而不是在这里重写一遍比对逻辑 —— 让 CI 走的就是
+          # 用户拿到手会走的那条路。顺带把「secret 里的 pfx」和「仓库钉的公钥证书」
+          # 对一次：证书轮换了却忘了更新 tools/codesign/，这里立刻红。
+          & .\tools\verify-windows.ps1 -Exe "build/dist/pojia-modifier.exe"
+          if ($LASTEXITCODE -ne 0) { throw "验签不通过：签名者与仓库钉定的证书不一致" }
+
+          Remove-Item -Recurse -Force $dir
+          Write-Host "签名 OK"
+
+      - name: 冒烟：产物能跑、版本号对
+        shell: python
+        run: |
+          import glob, os, subprocess, sys
+          # 再兜一层：即便 env 没生效，也别让"打印中文"把这一步搞挂。
+          try:
+              sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+          except Exception:
+              pass
+
+          cands = [p for p in glob.glob(os.path.join("build", "dist", "*"))
+                   if os.path.isfile(p)]
+          assert len(cands) == 1, "expected exactly one binary, got %r" % (cands,)
+          exe = cands[0]
+          if os.name != "nt":
+              os.chmod(exe, 0o755)
+
+          r = subprocess.run([exe, "--version"], capture_output=True, text=True,
+                             encoding="utf-8", errors="replace", timeout=180)
+          print("--version exit=%s stdout=%r" % (r.returncode, r.stdout.strip()))
+          assert r.returncode == 0, "--version failed: %r" % (r.stderr,)
+          assert "CE" in r.stdout, "version output missing CE: %r" % (r.stdout,)
+
+          # --help 会把目标列表拼出来，顺带确认注册表在冻结态也是完整的
+          r2 = subprocess.run([exe, "--help"], capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=180)
+          assert r2.returncode == 0, "--help failed: %r" % (r2.stderr,)
+          assert "kiro" in r2.stdout, "--help 里没列出 kiro"
+          print("smoke OK, size=%d bytes" % os.path.getsize(exe))
+
+      - name: 冒烟：图形界面能起来
+        shell: bash
+        run: |
+          # --version / --status 全绿也不代表 GUI 在包里：它是 runpy 从数据文件跑的，
+          # 漏了 --add-data 只有敲 --gui 那一刻才炸。这一步真起服务、真点一次动作。
+          python tools/gui_smoke.py "build/dist/$BIN_NAME${{ matrix.ext }}"
+
+      # macOS 的安装包：再打一份目录形态，套上自解压安装器。复用同一个 runner，
+      # 省掉一次 checkout 和 pip install —— macOS runner 排队本来就慢。
+      - name: 打安装包（macOS）
+        if: startsWith(matrix.asset, 'macos-')
+        shell: bash
+        run: |
+          mkdir -p build/dist-onedir build/work-onedir build/spec-onedir
+          python tools/build_exe.py --name "$BIN_NAME" --onedir \
+            --dist build/dist-onedir \
+            --work build/work-onedir \
+            --spec build/spec-onedir
+          python tools/build_unix_installer.py \
+            --src "build/dist-onedir/$BIN_NAME" --asset "${{ matrix.asset }}"
+
+      - name: 冒烟：装一遍、跑一次、再卸掉（macOS）
+        if: startsWith(matrix.asset, 'macos-')
+        shell: bash
+        run: |
+          # 装 / 升 / 卸这条链只有真跑一遍才知道通不通。HOME 指到临时目录，
+          # 免得往 runner 的主目录里扔软链和桌面项。
+          set -e
+          D=$(mktemp -d)
+          export HOME="$D"
+          sh "out/$BIN_NAME-${{ matrix.asset }}-installer.command" --yes --quiet --prefix "$D/app"
+          test -x "$D/app/$BIN_NAME" || { echo "装完没有可执行文件"; exit 1; }
+          test -f "$D/app/install.json" || { echo "没写 install.json"; exit 1; }
+          VER=$("$D/app/$BIN_NAME" --version)
+          echo "装好的版本：$VER"
+          case "$VER" in *CE*) ;; *) echo "--version 输出不对：$VER"; exit 1 ;; esac
+          "$D/app/$BIN_NAME" --uninstall --yes --quiet
+          test ! -f "$D/app/$BIN_NAME" || { echo "卸载没删掉程序"; exit 1; }
+          echo "安装 / 卸载冒烟通过"
+
+      - name: 改名
+        shell: bash
+        run: |
+          mkdir -p out
+          cp "build/dist/$BIN_NAME${{ matrix.ext }}" \
+             "out/$BIN_NAME-${{ matrix.asset }}${{ matrix.ext }}"
+          ls -lh out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BIN_NAME }}-${{ matrix.asset }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 14
+
+      # 打 tag 时才发 Release。先 view 再 create，多个 job 并发跑也不会互相踩；
+      # 上传用 --clobber，重跑同一个 tag 能覆盖旧产物。
+      - name: 发布到 Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG 已被并发 job 建好，这里只上传产物"
+          else
+            # 有手写的发布说明就用它，没有才退回自动生成 —— 自动生成会把
+            # 从第一个提交起的全部 commit 标题堆上来，对使用者没意义。
+            NOTES="docs/release-notes/$TAG.md"
+            if [ -f "$NOTES" ]; then
+              gh release create "$TAG" --title "破甲一键通 ${TAG#v}" --notes-file "$NOTES"
+            else
+              gh release create "$TAG" --title "破甲一键通 ${TAG#v}" --generate-notes
+            fi
+          fi
+
+          # 上传产物。用 out/* 而不是具体文件名：macOS 那边一次出两个
+          # （裸二进制 + 安装器），写死名字会漏掉其中一个，而漏掉的恰好是
+          # 安装版用户 --update 要下的那个。
+          gh release upload "$TAG" out/* --clobber
+
+          # 最后强制「已发布」。删过 tag 再重推、或者 release 建得比 tag 早的时候，
+          # gh 会把它留在**草稿**态 —— 草稿在 Releases 页面公开访问时看不到，用户
+          # 只会看到一个空页面，以为发布挂了。发布过的再 edit 一次是无害的。
+          gh release edit "$TAG" --draft=false
+
+          # 发布说明跟着仓库走：Release 早于说明改动的（比如先发后补），重跑一次
+          # 就同步过来，不用手动去网页上贴。
+          NOTES="docs/release-notes/$TAG.md"
+          if [ -f "$NOTES" ]; then
+            gh release edit "$TAG" --notes-file "$NOTES"
+          fi
+
+  # Windows 安装程序。目录形态的产物 + NSIS = 一个 setup.exe。
+  #
+  # 为什么发安装程序：散着发 exe 和 zip，用户得先猜哪个能用。setup 装完就有
+  # 开始菜单项、卸载项和 PATH，双击也能直接跑。
+  #
+  # 为什么底子是目录形态：单文件版每次启动都要把自身解包到 %TEMP%\_MEIxxxxxx
+  # 再运行，有些机器的安全软件不放行在临时目录里创建可执行文件，启动即报
+  # "Could not create temporary directory!"。安装版把 _internal/ 放在 exe 旁边，
+  # 一步都不碰临时目录。
+  #
+  # 单文件 exe 仍然发（便携场景），只是 Release 里标成备选。
+  windows-setup:
+    name: windows-x64-setup
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安装打包工具
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "pyinstaller==${{ env.PYINSTALLER_VERSION }}"
+          python -m pip install "cython==${{ env.CYTHON_VERSION }}" || echo "::warning::Cython 装不上，本次产物走纯源码打包"
+          # makensis。choco 装的会进 Program Files (x86)\NSIS，tools/build_installer.py
+          # 自己找得到，不用加 PATH。
+          choco install nsis -y --no-progress
+
+      - name: 打包（目录形态）
+        shell: bash
+        run: |
+          mkdir -p build/dist-onedir build/work-onedir build/spec-onedir
+          python tools/build_exe.py --name "$BIN_NAME" --onedir \
+            --dist build/dist-onedir \
+            --work build/work-onedir \
+            --spec build/spec-onedir
+
+      - name: 冒烟：产物能跑、版本号对
+        shell: python
+        run: |
+          import os, subprocess, sys
+          try:
+              sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+          except Exception:
+              pass
+          exe = os.path.join("build", "dist-onedir", "pojia-modifier", "pojia-modifier.exe")
+          assert os.path.isfile(exe), "没有产物：%s" % exe
+          r = subprocess.run([exe, "--version"], capture_output=True, text=True,
+                             encoding="utf-8", errors="replace", timeout=180)
+          print("--version exit=%s stdout=%r" % (r.returncode, r.stdout.strip()))
+          assert r.returncode == 0, "--version failed: %r" % (r.stderr,)
+          assert "CE" in r.stdout
+          r2 = subprocess.run([exe, "--help"], capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=180)
+          assert r2.returncode == 0, "--help failed: %r" % (r2.stderr,)
+          assert "kiro" in r2.stdout
+          print("smoke OK")
+
+      - name: 冒烟：图形界面能起来
+        shell: bash
+        run: python tools/gui_smoke.py "build/dist-onedir/pojia-modifier/pojia-modifier.exe"
+
+      - name: 签名（内层 exe，配了证书才签）
+        shell: pwsh
+        env:
+          PFX_B64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          PFX_PW: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: |
+          # 没配证书就跳过 —— 产物照样能用，只是属性页显示「未知发布者」。
+          if (-not $env:PFX_B64) {
+            Write-Host "::notice::没有配置 WINDOWS_SIGNING_PFX_BASE64，跳过签名"
+            exit 0
+          }
+          $dir = Join-Path $env:RUNNER_TEMP "signing"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $pfx = Join-Path $dir "pojia-signing.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX_B64))
+          [IO.File]::WriteAllText(
+            (Join-Path $dir "pojia-signing-密码.txt"),
+            $env:PFX_PW,
+            (New-Object System.Text.UTF8Encoding($false)))
+
+          & .\tools\sign-windows.ps1 -Exe "build/dist-onedir/pojia-modifier/pojia-modifier.exe" -Pfx $pfx
+          if ($LASTEXITCODE -ne 0) { throw "签名失败（sign-windows.ps1 退出码 $LASTEXITCODE）" }
+          Remove-Item -Recurse -Force $dir
+          Write-Host "内层 exe 签名 OK"
+
+      - name: 生成安装程序
+        shell: bash
+        run: |
+          python tools/build_installer.py --src build/dist-onedir/pojia-modifier \
+            --out "out/$BIN_NAME-windows-x64-setup.exe"
+
+      - name: 签名（安装程序）
+        shell: pwsh
+        env:
+          PFX_B64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          PFX_PW: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: |
+          if (-not $env:PFX_B64) {
+            Write-Host "::notice::没有配置证书，跳过 setup 签名"
+            exit 0
+          }
+          $dir = Join-Path $env:RUNNER_TEMP "signing2"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $pfx = Join-Path $dir "pojia-signing.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX_B64))
+          [IO.File]::WriteAllText(
+            (Join-Path $dir "pojia-signing-密码.txt"),
+            $env:PFX_PW,
+            (New-Object System.Text.UTF8Encoding($false)))
+
+          & .\tools\sign-windows.ps1 -Exe "out/pojia-modifier-windows-x64-setup.exe" -Pfx $pfx
+          if ($LASTEXITCODE -ne 0) { throw "setup 签名失败" }
+          & .\tools\verify-windows.ps1 -Exe "out/pojia-modifier-windows-x64-setup.exe"
+          if ($LASTEXITCODE -ne 0) { throw "验签不通过：签名者与仓库钉定的证书不一致" }
+          Remove-Item -Recurse -Force $dir
+          Write-Host "setup 签名 OK"
+
+      - name: 冒烟：静默装一遍、跑一次、再卸掉
+        shell: pwsh
+        run: |
+          # 这一步才是真的验安装包。--version 只能说明里面那个 exe 是好的，
+          # 装不上、装完起不来、卸载删不干净，都得到这儿才暴露。
+          $tmp = Join-Path $env:RUNNER_TEMP "pojia-install"
+          if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
+
+          # /D= 必须是最后一个参数，且不能加引号；静默安装不看任何页面。
+          $p = Start-Process -FilePath "out\pojia-modifier-windows-x64-setup.exe" `
+                             -ArgumentList "/S", "/D=$tmp" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "静默安装失败，退出码 $($p.ExitCode)" }
+
+          if (-not (Test-Path "$tmp\pojia-modifier.exe")) { throw "装完没有 exe" }
+          if (-not (Test-Path "$tmp\_internal")) { throw "装完没有 _internal/" }
+          if (-not (Test-Path "$tmp\uninstall.exe")) { throw "装完没有卸载程序" }
+
+          # 控制台子系统的 exe，pwsh 会等它退出；用 -join 拼回一行再判，避免
+          # 多行输出被当成数组比较。
+          $ver = (& "$tmp\pojia-modifier.exe" --version 2>&1) -join " "
+          Write-Host "装好的版本：$ver"
+          if ($LASTEXITCODE -ne 0) { throw "--version 失败" }
+          if ($ver -notmatch "CE") { throw "--version 输出不对：$ver" }
+
+          # 安装态判定：程序靠这条决定升级时下 setup 还是裸 exe。
+          $key = "HKCU:\Software\Mladery\pojia-modifier"
+          $dir = (Get-ItemProperty -Path $key -Name InstallDir).InstallDir
+          if ($dir -ne $tmp) { throw "注册表 InstallDir 不对：$dir" }
+
+          $un = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\pojia-modifier"
+          if (-not (Test-Path $un)) { throw "没有卸载登记项" }
+
+          & "$tmp\uninstall.exe" /S
+          Start-Sleep -Seconds 3
+          if (Test-Path "$tmp\pojia-modifier.exe") { throw "卸载没删掉 exe" }
+          if (Test-Path $un) { throw "卸载没清注册表" }
+          Write-Host "安装 / 卸载冒烟通过"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BIN_NAME }}-windows-x64-setup
+          path: out/*.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: 发布到 Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            NOTES="docs/release-notes/$TAG.md"
+            if [ -f "$NOTES" ]; then
+              gh release create "$TAG" --title "破甲一键通 ${TAG#v}" --notes-file "$NOTES" || true
+            else
+              gh release create "$TAG" --title "破甲一键通 ${TAG#v}" --generate-notes || true
+            fi
+          fi
+          gh release upload "$TAG" out/*.exe --clobber
+          gh release edit "$TAG" --draft=false || true
+
+  # Linux 安装包。和 Windows 的 setup 对位：装到 ~/.local/share/pojia-modifier，
+  # 免 root，再跑一次就是升级，卸载交给程序自己的 --uninstall。
+  #
+  # 为什么不用 .deb：deb 装到 /usr/lib，--update 每次都得 sudo，自动更新就废了。
+  # 自解压脚本装到用户目录，和 Windows 装 %LOCALAPPDATA% 是同一个理由。
+  linux-installer:
+    name: linux-x64-installer
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安装打包工具
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "pyinstaller==${{ env.PYINSTALLER_VERSION }}"
+          python -m pip install "cython==${{ env.CYTHON_VERSION }}" || echo "::warning::Cython 装不上，本次产物走纯源码打包"
+
+      - name: 打包（目录形态）
+        shell: bash
+        run: |
+          mkdir -p build/dist-onedir build/work-onedir build/spec-onedir
+          python tools/build_exe.py --name "$BIN_NAME" --onedir \
+            --dist build/dist-onedir \
+            --work build/work-onedir \
+            --spec build/spec-onedir
+
+      - name: 生成安装包
+        shell: bash
+        run: |
+          python tools/build_unix_installer.py \
+            --src "build/dist-onedir/$BIN_NAME" --asset linux-x64
+          ls -lh out/
+
+      - name: 冒烟：装一遍、跑一次、再卸掉
+        shell: bash
+        run: |
+          # 一个临时 HOME，把软链、.desktop、安装目录全关在里面。
+          set -e
+          D=$(mktemp -d)
+          export HOME="$D"
+          sh "out/$BIN_NAME-linux-x64-installer.run" --yes --quiet --prefix "$D/app"
+
+          test -x "$D/app/$BIN_NAME" || { echo "装完没有可执行文件"; exit 1; }
+          test -f "$D/app/install.json" || { echo "没写 install.json"; exit 1; }
+          test -L "$D/.local/bin/$BIN_NAME" || { echo "没建命令行软链"; exit 1; }
+          test -f "$D/.local/share/applications/$BIN_NAME.desktop" || { echo "没写桌面项"; exit 1; }
+
+          VER=$("$D/app/$BIN_NAME" --version)
+          echo "装好的版本：$VER"
+          case "$VER" in *CE*) ;; *) echo "--version 输出不对：$VER"; exit 1 ;; esac
+
+          # 升级一次：同一个包再跑一遍必须成功，且不丢数据。留个文件当探针。
+          mkdir -p "$D/app/状态"
+          echo keep > "$D/app/状态/探针.txt"
+          sh "out/$BIN_NAME-linux-x64-installer.run" --yes --quiet --prefix "$D/app"
+          test -f "$D/app/状态/探针.txt" || { echo "升级把用户数据弄丢了"; exit 1; }
+
+          "$D/app/$BIN_NAME" --uninstall --yes --quiet
+          test ! -f "$D/app/$BIN_NAME" || { echo "卸载没删掉程序"; exit 1; }
+          test ! -e "$D/.local/bin/$BIN_NAME" || { echo "卸载没摘软链"; exit 1; }
+          test ! -e "$D/.local/share/applications/$BIN_NAME.desktop" || { echo "卸载没摘桌面项"; exit 1; }
+          test -f "$D/app/状态/探针.txt" || { echo "卸载把用户数据删了（默认该保留）"; exit 1; }
+          echo "安装 / 升级 / 卸载冒烟通过"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BIN_NAME }}-linux-x64-installer
+          path: out/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: 发布到 Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            NOTES="docs/release-notes/$TAG.md"
+            if [ -f "$NOTES" ]; then
+              gh release create "$TAG" --title "破甲一键通 ${TAG#v}" --notes-file "$NOTES" || true
+            else
+              gh release create "$TAG" --title "破甲一键通 ${TAG#v}" --generate-notes || true
+            fi
+          fi
+          gh release upload "$TAG" out/* --clobber
+          gh release edit "$TAG" --draft=false || true
+
+  # 四个平台的产物汇总成一份校验和。Windows 走签名验签，另外三个平台只有
+  # SHA-256 这一条路 —— 所以这份文件是它们唯一的完整性凭据。
+  checksums:
+    name: checksums
+    # 安装程序也算发布产物，缺了它这份校验和就不全。
+    needs: [build, windows-setup, linux-installer]
+    if: needs.build.result == 'success' && needs.windows-setup.result == 'success' && needs.linux-installer.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: 生成 SHA256SUMS.txt
+        run: |
+          cd artifacts
+          ls -la
+          sha256sum ./* > SHA256SUMS.txt
+          echo "---- SHA256SUMS.txt ----"
+          cat SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SHA256SUMS
+          path: artifacts/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: 校验和也发到 Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 这个 job 没有 checkout，工作区里没有 .git，gh 推不出仓库是谁 ——
+          # 会直接 `fatal: not a git repository`。GH_REPO 把仓库写死给它。
+          GH_REPO: ${{ github.repository }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          # 正常情况下平台 job 已经建好并发布了 Release；这里只在它没建起来时兜底。
+          # 兜底也要带发布说明，别用 --generate-notes —— 那会把从第一个提交起的
+          # 全部 commit 标题堆上去。建完同样强制「已发布」，别留草稿。
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            NOTES="docs/release-notes/$TAG.md"
+            if [ -f "$NOTES" ]; then
+              gh release create "$TAG" --title "破甲一键通 ${TAG#v}" --notes-file "$NOTES" || true
+            else
+              gh release create "$TAG" --title "破甲一键通 ${TAG#v}" --generate-notes || true
+            fi
+          fi
+          gh release upload "$TAG" artifacts/SHA256SUMS.txt --clobber
+          gh release edit "$TAG" --draft=false || true

@@ -15,11 +15,7 @@ import sys
 import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-# 默认测 src/pojia.py。补功能期间被测实现还在 rewrite/src/ 下，用 POJIA_CORE 指过去：
-#   POJIA_CORE=rewrite/src/pojia.py py -3 -m pytest tests/contract -q --basetemp=/tmp/pt
-CORE = os.path.abspath(os.environ.get("POJIA_CORE") or os.path.join(ROOT, "src", "pojia.py"))
-if not os.path.isfile(CORE):
-    raise SystemExit("POJIA_CORE 指向的文件不存在：%s" % CORE)
+CORE = os.path.join(ROOT, "src", "pojia.py")
 
 # 子进程只拿到这几项，其余一概不给。目的是切断任何"读到本机真实配置"的可能。
 _PASS_ENV = ("PATH", "SystemRoot", "SystemDrive", "COMSPEC", "PATHEXT",

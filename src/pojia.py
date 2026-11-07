@@ -5603,7 +5603,7 @@ def scan_secrets(path):
         m = SECRET_KEY_RE.search(line)
         if m:
             value = ""
-            parts = re.split(r"[:=]", line, 1)
+            parts = re.split(r"[:=]", line, maxsplit=1)
             if len(parts) == 2:
                 value = parts[1]
             elif len(line.split()) > 1:
