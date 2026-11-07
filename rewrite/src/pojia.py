@@ -95,6 +95,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 STATE_DIR = os.path.join(SCRIPT_DIR, STATE_DIRNAME)
 
 IS_WIN = os.name == "nt"
+IS_MAC = sys.platform == "darwin"
 
 # 运行时开关（由命令行写入，模块内直接读）
 OPT = {
@@ -3189,6 +3190,117 @@ def do_git_bash(enable):
     ok, note = gitbash_install(cfg, exe, OPT["dry"])
     say(note)
     return 0 if ok else 1
+
+
+# ---------------------------------------------------------------------------
+# 5.10 macOS 签名（--mac-check / --resign）
+# ---------------------------------------------------------------------------
+#
+# 往 .app 里写过文件，原签名必然失效；带 quarantine 标记的包再启动就会报
+# 「已损坏，无法打开」。这个功能存在的唯一理由就是查这个、必要时 ad-hoc 重签。
+# ad-hoc 会顶掉厂商签名且不可逆，所以默认只报告，显式 --resign 才动手。
+
+MAC_APP_HINTS = ("DeepSeek Harness", "DSH Desktop", "WorkBuddy", "Cursor", "Trae",
+                 "Windsurf", "Kiro", "CodeBuddy", "ZCode", "iFlow", "Claude", "Codex")
+
+
+def _exec(cmd, timeout=120):
+    """跑一个外部命令 -> (退出码 | None, 输出)。None 表示压根没跑起来。"""
+    try:
+        done = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return None, ""
+    return done.returncode, (done.stdout or b"").decode("utf-8", "replace").strip()
+
+
+def codesign_verify(app_path, timeout=120):
+    """-> (签名是否完整, 说明)。非 macOS 一律当「跳过」。"""
+    if not IS_MAC or not app_path:
+        return True, "跳过（非 macOS）"
+    rc, out = _exec(["codesign", "--verify", "--strict", "--deep", app_path], timeout)
+    if rc is None:
+        return True, "跳过（codesign 不可用：%s）" % out
+    return (rc == 0), (out or "签名完整")
+
+
+def codesign_adhoc(app_path, timeout=300):
+    """ad-hoc 重签。会顶掉厂商签名，调用方必须显式要求。"""
+    if not IS_MAC or not app_path:
+        return False, "跳过（非 macOS）"
+    rc, out = _exec(["codesign", "--force", "--deep", "--sign", "-", app_path], timeout)
+    if rc is None:
+        return False, "codesign 不可用：%s" % out
+    return (rc == 0), (out or "已 ad-hoc 重签")
+
+
+def mac_app_candidates(dirs=None):
+    """扫 /Applications 与 ~/Applications，按认得的名字挑 .app。"""
+    if dirs is None:
+        dirs = ["/Applications", os.path.join(home(), "Applications")]
+    out, seen = [], set()
+    for folder in dirs:
+        if not os.path.isdir(long_path(folder)):
+            continue
+        try:
+            names = sorted(os.listdir(long_path(folder)))
+        except OSError:
+            continue
+        for name in names:
+            if not name.endswith(".app"):
+                continue
+            low = name.lower()
+            if not any(h.lower() in low for h in MAC_APP_HINTS):
+                continue
+            path = os.path.join(folder, name)
+            if path in seen:
+                continue
+            seen.add(path)
+            out.append(path)
+    return out
+
+
+def run_mac_check(paths=None, resign=False):
+    """只读体检；resign=True 才 ad-hoc 重签。返回退出码。"""
+    say("")
+    say("macOS 签名体检（%s）" % ("会重签" if resign else "只读：不修不重签，加 --resign 才动手"))
+    if not IS_MAC:
+        fail_msg("这个功能只在 macOS 上生效；当前是 %s，没有 codesign 可用。" % sys.platform)
+        return 1
+    apps = [p for p in (paths or []) if p]
+    if not apps:
+        apps = mac_app_candidates()
+    if not apps:
+        say("  /Applications 和 ~/Applications 里没找到认得的客户端包。")
+        say("  装到别处就直接指路径：--mac-check \"/Volumes/Xxx/DSH Desktop.app\"")
+        return 0
+    bad = []
+    for app in apps:
+        ok, note = codesign_verify(app)
+        if ok:
+            say("  [正常] %s" % app)
+            continue
+        bad.append(app)
+        say("  [失效] %s" % app)
+        for line in note.splitlines()[:3]:
+            say("         %s" % line.strip())
+    if not bad:
+        say("  结论：%d 个包签名都完整。" % len(apps))
+        return 0
+    if not resign:
+        say("  结论：%d/%d 个签名失效。重签会顶掉厂商签名且不可逆，确需修复再加 --resign。"
+            % (len(bad), len(apps)))
+        return 0
+    failed = 0
+    for app in bad:
+        ok, note = codesign_adhoc(app)
+        say("  [%s] %s" % ("已重签" if ok else "重签失败", app))
+        if not ok and note:
+            say("         %s" % note.splitlines()[0][:160])
+            failed += 1
+    if failed:
+        fail_msg("%d 个包重签失败（多半是没有写权限，试试 sudo）" % failed)
+    return 1 if failed else 0
 
 
 # ---------------------------------------------------------------------------
@@ -6359,15 +6471,9 @@ def main(argv=None):
     if o.update:
         say("%s %s：当前已是最新（离线校验，不联网）。" % (APP, DISPLAY_VERSION))
         return 0
-    if o.mac_check is not None:
-        if sys.platform == "darwin":
-            say("macOS 签名检查：%s" % ("需要重签" if not is_admin() else "无法判定"))
-        else:
-            say("--mac-check 只在 macOS 上有意义。")
-        return 0
-    if o.resign:
-        say("--resign 不在本实现范围内（见 README 的边界一节）。")
-        return 0
+    if o.mac_check is not None or o.resign:
+        given = (o.mac_check or "").strip()
+        return run_mac_check([given] if given else [], bool(o.resign))
     if o.git_bash is not None and not (o.apply or o.revert):
         return do_git_bash(o.git_bash)
     if o.guard:
