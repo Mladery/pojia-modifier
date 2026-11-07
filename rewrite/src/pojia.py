@@ -6185,12 +6185,146 @@ def do_purge(ctx, targets):
     return code
 
 
-def do_uninstall(ctx, targets):
-    code = do_revert(ctx, targets)
+INSTALL_META = "install.json"
+INSTALL_PROGRAM_FILES = ("pojia-modifier.exe", "pojia-modifier", "_internal",
+                         INSTALL_META, "_update.sh", "_update.bat", "unins000.exe")
+
+
+def install_meta():
+    """读安装目录里的 install.json。prefix 和实际目录对不上就当没装。"""
+    data = load_json(os.path.join(SCRIPT_DIR, INSTALL_META), {})
+    if not isinstance(data, dict) or not data:
+        return {}
+    prefix = str(data.get("prefix") or "")
+    if prefix and norm(prefix) != norm(SCRIPT_DIR):
+        return {}
+    return data
+
+
+def install_dir():
+    meta = install_meta()
+    return os.path.abspath(str(meta.get("prefix") or SCRIPT_DIR)) if meta else ""
+
+
+def our_links():
+    """本工具留下的快捷方式 / 软链。只认指向自己的，别人的一律不碰。"""
+    out = []
+    here = os.path.abspath(SCRIPT_DIR).lower()
+    if IS_WIN:
+        folders = (os.path.join(home(), "Desktop"),
+                   os.path.join(home(), "AppData", "Roaming", "Microsoft",
+                                "Windows", "Start Menu", "Programs"))
+        for folder in folders:
+            if not os.path.isdir(long_path(folder)):
+                continue
+            try:
+                names = os.listdir(long_path(folder))
+            except OSError:
+                continue
+            for name in names:
+                if not name.lower().endswith(".lnk"):
+                    continue
+                path = os.path.join(folder, name)
+                target = shortcut_target(path)
+                if target and os.path.abspath(target).lower().startswith(here):
+                    out.append(path)
+    else:
+        link = os.path.join(home(), ".local", "bin", "pojia-modifier")
+        try:
+            if os.path.islink(link) and os.path.realpath(link).lower().startswith(here):
+                out.append(link)
+        except OSError:
+            pass
+        desk = os.path.join(home(), ".local", "share", "applications", "pojia-modifier.desktop")
+        if os.path.isfile(long_path(desk)):
+            out.append(desk)
+    return out
+
+
+def _uninstall_script(paths):
+    """Windows 删自己：写一个延迟批处理，主进程先退出，它再动手。"""
+    folder = os.environ.get("TEMP") or os.environ.get("TMP") or "."
+    bat = os.path.join(folder, "pojia-uninstall-%d.bat" % int(time.time()))
+    lines = ["@echo off", "timeout /t 2 /nobreak >nul"]
+    for path in paths:
+        if os.path.isdir(long_path(path)):
+            lines.append('rmdir /s /q "%s"' % path)
+        else:
+            lines.append('del /f /q "%s"' % path)
+    lines.append('del /f /q "%~f0"')
+    try:
+        with open(long_path(bat), "w", encoding="mbcs", newline="\r\n") as fh:
+            fh.write("\r\n".join(lines) + "\r\n")
+    except (OSError, LookupError):
+        return ""
+    return bat
+
+
+def _run_detached(argv):
+    try:
+        flags = 0x00000008 | 0x00000200        # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+        subprocess.Popen(argv, creationflags=flags, close_fds=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def do_uninstall(ctx, targets, purge=False):
+    """--uninstall：删程序本体、快捷方式；--purge 时连用户数据一起删。"""
+    prefix = install_dir()
+    if not prefix:
+        fail_msg("这里不是安装目录（没有 %s），没有可卸的程序本体。" % INSTALL_META)
+        say("  源码或绿色版直接删掉 %s 即可。" % SCRIPT_DIR)
+        say("  用户数据（还原记录与备份）在：%s" % STATE_DIR)
+        return 1
     say("")
-    say("已还原所有目标。本程序不会删除自己（正在运行），请手动删除：%s" % os.path.abspath(__file__))
-    say("状态与备份保留在：%s" % STATE_DIR)
-    return code
+    say("卸载：%s%s" % (prefix, "（连用户数据一起删）" if purge else ""))
+    code = do_revert(ctx, targets)
+    if code:
+        say("  还原有失败项（退出码 %d），继续卸载" % code)
+    victims = [prefix] if purge else []
+    if not purge:
+        for name in INSTALL_PROGRAM_FILES:
+            path = os.path.join(prefix, name)
+            if os.path.exists(long_path(path)):
+                victims.append(path)
+        victims.extend(our_links())
+    if not victims:
+        say("  程序文件本来就不在了，没什么可删。")
+        return 0
+    if OPT["dry"]:
+        say("[预演] 会删除：")
+        for path in victims:
+            say("  %s" % path)
+        return 0
+    if IS_WIN:
+        bat = _uninstall_script(victims)
+        if bat and _run_detached(["cmd", "/c", bat]):
+            say("  已安排删除，本进程退出后生效。")
+            if not purge:
+                say("  用户数据保留在：%s（要一起删就加 --purge）" % STATE_DIR)
+            return 0
+        fail_msg("删除脚本起不来，请手动删除：")
+        for path in victims:
+            say("  %s" % path)
+        return 1
+    failed = []
+    for path in victims:
+        try:
+            if os.path.isdir(long_path(path)):
+                shutil.rmtree(long_path(path))
+            else:
+                os.remove(long_path(path))
+        except OSError:
+            failed.append(path)
+    if failed:
+        fail_msg("这些删不掉，请手动删：")
+        for path in failed:
+            say("  %s" % path)
+        return 1
+    say("  已卸载干净。" if purge else "  程序已删除；用户数据还在 %s" % STATE_DIR)
+    return 0
 
 
 def do_persona_list(ctx):
@@ -6464,10 +6598,10 @@ def main(argv=None):
         return do_revert(ctx, targets)
     if o.restore:
         return do_restore(ctx, targets)
+    if o.uninstall:
+        return do_uninstall(ctx, targets, bool(o.purge))
     if o.purge:
         return do_purge(ctx, targets)
-    if o.uninstall:
-        return do_uninstall(ctx, targets)
     if o.update:
         say("%s %s：当前已是最新（离线校验，不联网）。" % (APP, DISPLAY_VERSION))
         return 0
