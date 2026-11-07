@@ -34,14 +34,11 @@ MARK = "__POJIA_PAYLOAD_BELOW__"
 
 
 def core_version():
-    """从源码读 VERSION + EDITION（形如 1.0-mod）。版本号只写一处，别处都是读出来的。"""
+    """从源码读 VERSION。版本号只写一处，别处都是读出来的。"""
     with open(SRC_PY, encoding="utf-8", errors="replace") as f:
         s = f.read()
     ver = re.search(r'^VERSION\s*=\s*"([^"]+)"', s, re.M)
-    ed = re.search(r'^EDITION\s*=\s*"([^"]*)"', s, re.M)
-    if not ver:
-        return "0.0"
-    return ver.group(1) + ("-" + ed.group(1) if ed and ed.group(1) else "")
+    return ver.group(1) if ver else "0.0"
 
 
 def default_out(asset):
@@ -139,7 +136,7 @@ def main():
     ap.add_argument("--asset", required=True,
                     help="linux-x64 / macos-x64 / macos-arm64")
     ap.add_argument("--out", default="", help="输出路径，默认 out/<name>-<asset>-installer.<ext>")
-    ap.add_argument("--version", default="", help="不填就从源码读 VERSION+EDITION")
+    ap.add_argument("--version", default="", help="不填就从源码读 VERSION")
     a = ap.parse_args()
     return build(a.src, a.asset, a.out or default_out(a.asset), a.version)
 

@@ -126,17 +126,14 @@ def hidden_imports(*sources):
 
 
 def build_version(src):
-    """从核心脚本里读对外版本号：数字版 + 社区版后缀，例如 8.62-CE。"""
+    """从核心脚本里读对外版本号。"""
     try:
         with open(src, "r", encoding="utf-8", errors="ignore") as f:
             txt = f.read()
     except OSError:
         return ""
     m = re.search(r'^VERSION\s*=\s*"([^"]+)"', txt, re.M)
-    if not m:
-        return ""
-    e = re.search(r'^EDITION\s*=\s*"([^"]+)"', txt, re.M)
-    return m.group(1) + ("-" + e.group(1) if e else "")
+    return m.group(1) if m else ""
 
 
 def write_version_file(src, dest):

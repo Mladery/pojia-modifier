@@ -207,9 +207,9 @@ jobs:
             # 从第一个提交起的全部 commit 标题堆上来，对使用者没意义。
             NOTES="docs/release-notes/$TAG.md"
             if [ -f "$NOTES" ]; then
-              gh release create "$TAG" --title "破甲一键通 ${TAG#v}" --notes-file "$NOTES"
+              gh release create "$TAG" --title "破甲修改器 ${TAG#v}" --notes-file "$NOTES"
             else
-              gh release create "$TAG" --title "破甲一键通 ${TAG#v}" --generate-notes
+              gh release create "$TAG" --title "破甲修改器 ${TAG#v}" --generate-notes
             fi
           fi
 
@@ -412,9 +412,9 @@ jobs:
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             NOTES="docs/release-notes/$TAG.md"
             if [ -f "$NOTES" ]; then
-              gh release create "$TAG" --title "破甲一键通 ${TAG#v}" --notes-file "$NOTES" || true
+              gh release create "$TAG" --title "破甲修改器 ${TAG#v}" --notes-file "$NOTES" || true
             else
-              gh release create "$TAG" --title "破甲一键通 ${TAG#v}" --generate-notes || true
+              gh release create "$TAG" --title "破甲修改器 ${TAG#v}" --generate-notes || true
             fi
           fi
           gh release upload "$TAG" out/*.exe --clobber
@@ -511,9 +511,9 @@ jobs:
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             NOTES="docs/release-notes/$TAG.md"
             if [ -f "$NOTES" ]; then
-              gh release create "$TAG" --title "破甲一键通 ${TAG#v}" --notes-file "$NOTES" || true
+              gh release create "$TAG" --title "破甲修改器 ${TAG#v}" --notes-file "$NOTES" || true
             else
-              gh release create "$TAG" --title "破甲一键通 ${TAG#v}" --generate-notes || true
+              gh release create "$TAG" --title "破甲修改器 ${TAG#v}" --generate-notes || true
             fi
           fi
           gh release upload "$TAG" out/* --clobber
@@ -566,9 +566,9 @@ jobs:
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             NOTES="docs/release-notes/$TAG.md"
             if [ -f "$NOTES" ]; then
-              gh release create "$TAG" --title "破甲一键通 ${TAG#v}" --notes-file "$NOTES" || true
+              gh release create "$TAG" --title "破甲修改器 ${TAG#v}" --notes-file "$NOTES" || true
             else
-              gh release create "$TAG" --title "破甲一键通 ${TAG#v}" --generate-notes || true
+              gh release create "$TAG" --title "破甲修改器 ${TAG#v}" --generate-notes || true
             fi
           fi
           gh release upload "$TAG" artifacts/SHA256SUMS.txt --clobber

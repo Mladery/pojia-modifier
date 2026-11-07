@@ -12,7 +12,7 @@ _qq/
 .workbuddy-ai/
 
 # 根目录的临时脚本与快照：只忽略仓库根这一层，不误伤子目录里的同名文件
-# （rewrite/src/pojia.py 曾被裸规则 pojia.py 吃掉，导致实现文件进不了版本控制）
+# （src/pojia.py 曾被裸规则 pojia.py 吃掉，导致实现文件进不了版本控制）
 /_ad_poster.html
 /c1.json
 /c2.json
@@ -39,18 +39,10 @@ _qq/
 /_cmt*.py
 /_strip_cmt.py
 /.spec-src/
-/upstream/
 
 # 运行期状态（补丁清单，含本机绝对路径，不入库）
-状态/
-src/状态/
 state/
 backups/
-
-# 人格库：用户自己的片段（含个人文风/业务上下文），属于个人配置，不入库
-人格库/
-src/人格库/
-
 # 工作日志（.workbuddy-ai 的镜像），不进仓库
 memory/
 

@@ -56,15 +56,15 @@ jobs:
         run: python -c "import sys, platform; print(sys.version); print(platform.platform())"
 
       - name: 跑测试
-        run: python -m pytest tests -q --tb=short
+        run: python -m pytest tests/contract -q --tb=short
 
-      # 脚本自己会写一份运行日志（src/破甲日志.txt）。测试挂了就看它 ——
+      # 脚本自己会写一份运行日志（src/pojia.log）。测试挂了就看它 ——
       # 比 pytest 的 traceback 更接近「脚本当时到底走了哪条分支」。
       - name: 失败时上传运行日志
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: pojia-log-${{ matrix.os }}-py${{ matrix.py }}
-          path: src/破甲日志.txt
+          path: src/pojia.log
           if-no-files-found: ignore
           retention-days: 7

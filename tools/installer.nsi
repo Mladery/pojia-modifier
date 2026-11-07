@@ -1,4 +1,4 @@
-﻿; 破甲一键通 —— Windows 安装程序（NSIS 3）
+﻿; 破甲修改器 —— Windows 安装程序（NSIS 3）
 ;
 ; 拿 onedir 产物打一个 setup.exe：解到 %LOCALAPPDATA%\Programs\pojia-ce，
 ; 建开始菜单项、登记卸载项、可选桌面图标和 PATH。
@@ -43,7 +43,7 @@ ${UnStrRep}
   !define OUTFILE "out\pojia-ce-windows-x64-setup.exe"
 !endif
 
-!define APP_NAME      "破甲一键通"
+!define APP_NAME      "破甲修改器"
 !define APP_ID        "pojia-ce"
 !define APP_EXE       "pojia-ce.exe"
 !define APP_PUBLISHER "Mladery"

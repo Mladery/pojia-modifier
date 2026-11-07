@@ -44,7 +44,8 @@ import zlib
 
 VERSION = "1.0"                 # 护照里只存这个，纯数字
 DISPLAY_VERSION = "1.0"         # 界面上给人看的
-APP = "POJIA"
+APP = "POJIA"                   # 护照里的 tool 字段，磁盘契约，别改
+DISPLAY_NAME = "破甲修改器"      # 只用于对外文案
 
 MARK = "POJIA-NEXT-INJECT"
 BEGIN_LINE = "<!-- %s:BEGIN -->" % MARK
@@ -6983,7 +6984,8 @@ def build_parser():
         prog=os.path.basename(sys.argv[0]) or "pojia.py",
         add_help=True,
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        description="%s %s —— 给本机 AI 客户端批量注入操作者人格，并可整块撤回。" % (APP, DISPLAY_VERSION),
+        description="%s %s —— 给本机 AI 客户端批量注入操作者人格，并可整块撤回。"
+                    % (DISPLAY_NAME, DISPLAY_VERSION),
         epilog="无参数启动进入交互菜单；--help 查看全部开关。",
     )
     a = p.add_argument
@@ -7136,7 +7138,7 @@ def main(argv=None):
     collect_explicit(o)
 
     if o.version:
-        _emit("%s %s" % (APP, DISPLAY_VERSION))
+        _emit("%s %s（pojia-modifier）" % (DISPLAY_NAME, DISPLAY_VERSION))
         return 0
 
     if o.clear:

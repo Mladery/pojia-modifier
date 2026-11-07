@@ -13,7 +13,7 @@
 # 自动更新就废了。Windows 那边装 %LOCALAPPDATA% 也是这个道理。
 
 APP=pojia-ce
-APP_NAME=破甲一键通
+APP_NAME=破甲修改器
 VERSION="__VERSION__"
 ASSET="__ASSET__"
 

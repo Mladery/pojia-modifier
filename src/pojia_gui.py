@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-破甲一键通 · 图形界面（社区版）
+破甲修改器 · 图形界面
 ================================================================================
 
 本机网页 UI，零第三方依赖：只起一个 127.0.0.1 的 http.server，把按钮动作转成
@@ -16,7 +16,6 @@
 为什么用网页而不是 tkinter：
   · tkinter 的 ttk 主题在 Windows 上很难做出「现代极简」的观感 —— 圆角、阴影、
     过渡都要自己用 Canvas 画；网页这边几行 CSS 就够，而且天然支持深色终端区。
-  · 上游早期的 GUI 也是本机网页，用户习惯一致。
   · 仍然是零依赖：http.server / webbrowser / subprocess 全在标准库。
 
 安全边界：
@@ -104,9 +103,8 @@ def core_version():
         with open(CORE, "r", encoding="utf-8", errors="ignore") as f:
             txt = f.read()
         m = re.search(r'^VERSION\s*=\s*"([^"]+)"', txt, re.M)
-        e = re.search(r'^EDITION\s*=\s*"([^"]+)"', txt, re.M)
         if m:
-            return m.group(1) + ("-" + e.group(1) if e else "")
+            return m.group(1)
     except OSError:
         pass
     return "?"
@@ -217,7 +215,7 @@ PAGE = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>破甲一键通 · 社区版</title>
+<title>破甲修改器</title>
 <style>
   /* 纸墨：暖纸底 + 墨色字 + 一个靛青强调色。
      圆角三档：容器 12 / 控件 8 / 胶囊 999。
@@ -598,8 +596,7 @@ PAGE = r"""<!DOCTYPE html>
   <header class="topbar">
     <span class="seal" aria-hidden="true"></span>
     <div class="brand">
-      <b>破甲一键通</b>
-      <span class="tag">社区版</span>
+      <b>破甲修改器</b>
       <span class="ver mono">v__VERSION__</span>
     </div>
     <span class="grow"></span>
@@ -1143,7 +1140,7 @@ def main():
     port = srv.server_address[1]
     url = "http://%s:%d/?t=%s" % (host, port, TOKEN)
     print("=" * 66, flush=True)
-    print(" 破甲一键通 · 图形界面   v%s%s"
+    print(" 破甲修改器 · 图形界面   v%s%s"
           % (core_version(), "（打包版）" if FROZEN else ""), flush=True)
     print(" 地址：%s" % url, flush=True)
     print(" 关闭窗口或按 Ctrl+C 退出", flush=True)

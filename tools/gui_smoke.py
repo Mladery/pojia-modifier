@@ -59,7 +59,7 @@ def main():
             return fail("没等到界面地址（零参数启动没进界面，或者包里没带 pojia_gui.py）")
 
         html = urllib.request.urlopen(url, timeout=60).read().decode("utf-8", "replace")
-        if "破甲一键通" not in html:
+        if "破甲修改器" not in html:
             return fail("首页内容不对：%r" % html[:200])
         print("  首页 OK，%d 字节" % len(html))
 
