@@ -1938,6 +1938,231 @@ def shortcut_files(limit=1500):
 
 
 # ---------------------------------------------------------------------------
+# 5.6 Everything 检索（本项目新增，8.13 之后）
+#
+# 全盘索引，比有界遍历快两个数量级。两条路：es.exe 命令行，或内置 DLL 的 SDK。
+# 没有 Everything、DLL 位数不匹配、服务没起，一律静默降级——定位阶段不许抛。
+# 环境变量 POJIA_NO_EVERYTHING 可整体关掉。
+# ---------------------------------------------------------------------------
+
+_EVERYTHING = {"tried": False, "exe": "", "sdk_ready": False, "sdk": None}
+
+
+def vendor_dirs():
+    """内置 DLL 可能在打包目录、脚本目录、上一级目录。"""
+    here = SCRIPT_DIR
+    out = []
+    for base in (getattr(sys, "_MEIPASS", ""), here,
+                 os.path.dirname(here), os.path.dirname(sys.executable)):
+        if not base:
+            continue
+        out.append(os.path.join(base, "vendor", "everything"))
+        out.append(base)
+    return out
+
+
+def everything_dirs():
+    bases = vendor_dirs()
+    for env in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"):
+        root = os.environ.get(env)
+        if not root:
+            continue
+        bases.append(os.path.join(root, "Everything"))
+        bases.append(os.path.join(root, "Programs", "Everything"))
+    try:
+        import winreg
+        key = r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Everything.exe"
+        for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+            try:
+                with winreg.OpenKey(hive, key) as handle:
+                    exe = winreg.QueryValue(handle, None)
+                if exe:
+                    bases.append(os.path.dirname(str(exe).strip('"')))
+            except OSError:
+                continue
+    except ImportError:
+        pass
+    seen = set()
+    out = []
+    for base in bases:
+        if not base:
+            continue
+        try:
+            key = norm(base)
+        except (OSError, ValueError):
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(base)
+    return out
+
+
+def everything_exe():
+    if _EVERYTHING["tried"]:
+        return _EVERYTHING["exe"]
+    _EVERYTHING["tried"] = True
+    found = ""
+    if IS_WIN and not os.environ.get("POJIA_NO_EVERYTHING"):
+        found = shutil.which("es.exe") or shutil.which("es") or ""
+        if not found:
+            for base in everything_dirs():
+                probe = os.path.join(base, "es.exe")
+                if os.path.isfile(long_path(probe)):
+                    found = probe
+                    break
+    _EVERYTHING["exe"] = found
+    return found
+
+
+def everything_cli_find(name, limit=200, timeout=8):
+    """es.exe 查一次。没装 / 超时 / 返回码非零都返回 None（表示「这条路不通」）。"""
+    exe = everything_exe()
+    if not exe:
+        return None
+    try:
+        done = subprocess.run([exe, "-p", "-n", str(limit), name],
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                              timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if done.returncode != 0:
+        return None
+    want = name.lower()
+    hits = []
+    text = (done.stdout or b"").decode("mbcs" if IS_WIN else "utf-8", "replace")
+    for line in text.splitlines():
+        path = line.strip().strip('"')
+        if not path or not os.path.isabs(path):
+            continue
+        if os.path.basename(path).lower() != want:
+            continue
+        if os.path.isfile(long_path(path)):
+            hits.append(path)
+    return hits
+
+
+def _bind_everything(lib):
+    import ctypes
+    for name, argtypes, restype in (
+            ("Everything_SetSearchW", [ctypes.c_wchar_p], None),
+            ("Everything_SetMax", [ctypes.c_uint32], None),
+            ("Everything_SetRequestFlags", [ctypes.c_uint32], None),
+            ("Everything_QueryW", [ctypes.c_bool], ctypes.c_bool),
+            ("Everything_GetNumResults", [], ctypes.c_uint32),
+            ("Everything_GetResultFullPathNameW",
+             [ctypes.c_uint32, ctypes.c_wchar_p, ctypes.c_uint32], ctypes.c_uint32)):
+        fn = getattr(lib, name)
+        fn.argtypes = argtypes
+        fn.restype = restype
+    return lib
+
+
+def everything_sdk():
+    if _EVERYTHING["sdk_ready"]:
+        return _EVERYTHING["sdk"]
+    _EVERYTHING["sdk_ready"] = True
+    sdk = None
+    if IS_WIN and not os.environ.get("POJIA_NO_EVERYTHING"):
+        try:
+            import ctypes
+            for base in everything_dirs():
+                for dll in ("Everything64.dll", "Everything32.dll"):
+                    path = os.path.join(base, dll)
+                    if not os.path.isfile(long_path(path)):
+                        continue
+                    try:
+                        sdk = _bind_everything(ctypes.WinDLL(long_path(path)))
+                        break
+                    except (OSError, AttributeError):
+                        sdk = None
+                if sdk:
+                    break
+        except (ImportError, OSError):
+            sdk = None
+    _EVERYTHING["sdk"] = sdk
+    return sdk
+
+
+def everything_sdk_find(name, limit=200):
+    sdk = everything_sdk()
+    if not sdk:
+        return None
+    import ctypes
+    try:
+        sdk.Everything_SetSearchW(name)
+        sdk.Everything_SetMax(limit)
+        sdk.Everything_SetRequestFlags(0x00000004)
+        if not sdk.Everything_QueryW(True):
+            return None
+        total = sdk.Everything_GetNumResults()
+        want = name.lower()
+        buf = ctypes.create_unicode_buffer(32768)
+        hits = []
+        for index in range(total):
+            sdk.Everything_GetResultFullPathNameW(index, buf, len(buf))
+            path = buf.value
+            if os.path.basename(path).lower() != want:
+                continue
+            if os.path.isfile(long_path(path)):
+                hits.append(path)
+        return hits
+    except (OSError, AttributeError, ctypes.ArgumentError):
+        return None
+
+
+def everything_find(name, limit=200, timeout=8):
+    hits = everything_cli_find(name, limit, timeout)
+    if hits is not None:
+        return hits
+    return everything_sdk_find(name, limit)
+
+
+def path_depth(folder):
+    text = str(folder or "").strip()
+    if len(text) >= 2 and text[1] == ":" and text[0].isalpha():
+        text = text[2:]
+    return len([x for x in text.replace("\\", "/").split("/") if x and x != "."])
+
+
+def path_parent(path):
+    text = str(path or "").rstrip("\\/")
+    cut = max(text.rfind("\\"), text.rfind("/"))
+    if cut < 0:
+        return ""
+    head = text[:cut]
+    if len(head) == 2 and head[1] == ":" and head[0].isalpha():
+        return head + "\\"
+    return head
+
+
+def everything_walk(exe_name, valid, max_depth=8, steps=4):
+    """命中同名 exe 后，从它所在目录往上找带标志物的安装根。
+
+    只往上走 steps 层：DSH.exe 常在 <根>\\bin\\ 下面，光看父目录找不到标志物；
+    但也不能一路走到盘符根，那样任何一层碰巧有同名文件都会误命中。
+    """
+    hits = everything_find(exe_name)
+    if not hits:
+        return ""
+    for path in hits:
+        cur = path_parent(path)
+        if not cur or path_depth(cur) > max_depth:
+            continue
+        for _ in range(steps):
+            try:
+                if valid(cur):
+                    return cur
+            except (OSError, ValueError):
+                break
+            up = path_parent(cur)
+            if not up or up == cur:
+                break
+            cur = up
+    return ""
+
+
+# ---------------------------------------------------------------------------
 # 6. 注入层
 # ---------------------------------------------------------------------------
 
@@ -2338,6 +2563,9 @@ class Target(object):
             got = bounded_search(self.search_templates(), self.is_valid)
             if got:
                 return got, "深度遍历", tried
+        got = self.from_everything()
+        if got:
+            return got, "Everything 检索", tried
         got = self.from_process()
         if got:
             return got, "进程反推", tried
@@ -2417,6 +2645,37 @@ class Target(object):
                 if not up or up == cur:
                     break
                 cur = up
+        return ""
+
+    def from_everything(self):
+        """Everything 索引兜底。没装 / 没起 / 位数不符都静默返回空串。
+
+        比有界遍历快两个数量级，所以放在遍历之后、进程反推之前：遍历是「按模板
+        猜路径」，Everything 是「直接问索引」，前者猜不中时后者往往一问就中。
+        没有标志物的目标（zcode）不能凭 is_valid 判定，改成比对目录名。
+        """
+        if not IS_WIN:
+            return ""
+        stem = self.exe or (self.procs[0] if self.procs else "")
+        if not stem:
+            return ""
+        want = os.path.basename(self.rel_dir.rstrip("\\/")).lower()
+        names = [stem]
+        low = stem.lower()
+        if not low.endswith((".exe", ".cmd", ".bat")):
+            names.extend([stem + ".exe", stem + ".cmd"])
+
+        def ok(root):
+            if not root or not os.path.isdir(root):
+                return False
+            if self.markers:
+                return self.is_valid(root)
+            return bool(want) and os.path.basename(root.rstrip("\\/")).lower() == want
+
+        for name in names:
+            got = everything_walk(name, ok)
+            if got:
+                return got
         return ""
 
     def not_found(self, tried):
@@ -3118,6 +3377,12 @@ class WorkBuddyTarget(BlockTarget):
                                  lambda p: self.is_install(p) and self.is_intl(p) == (self.key == "wbintl"))
             if got:
                 return got, "深度遍历", tried
+        def ok_install(p):
+            return self.is_install(p) and self.is_intl(p) == (self.key == "wbintl")
+        for exe in ("WorkBuddy.exe", "WorkBuddyAI.exe"):
+            got = everything_walk(exe, ok_install)
+            if got:
+                return got, "Everything 检索", tried
         got = self.from_shortcut()
         if got:
             return got, "快捷方式", tried
@@ -3299,6 +3564,10 @@ class DshTarget(Target):
                                   "Program Files\\DSH", "DSH"], self.is_install, budget=8.0)
             if got:
                 return got, "深度遍历", tried
+        for exe in ("DSH.exe", "DeepSeek Harness.exe"):
+            got = everything_walk(exe, self.is_install)
+            if got:
+                return got, "Everything 检索", tried
         return "", "", tried
 
     def profile_dir(self):
