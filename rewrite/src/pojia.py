@@ -2107,21 +2107,8 @@ def shortcut_files(limit=1500):
 _EVERYTHING = {"tried": False, "exe": "", "sdk_ready": False, "sdk": None}
 
 
-def vendor_dirs():
-    """内置 DLL 可能在打包目录、脚本目录、上一级目录。"""
-    here = SCRIPT_DIR
-    out = []
-    for base in (getattr(sys, "_MEIPASS", ""), here,
-                 os.path.dirname(here), os.path.dirname(sys.executable)):
-        if not base:
-            continue
-        out.append(os.path.join(base, "vendor", "everything"))
-        out.append(base)
-    return out
-
-
 def everything_dirs():
-    bases = vendor_dirs()
+    bases = [tools_dir()]          # 外挂下载来的 es.exe / DLL 放这里
     for env in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"):
         root = os.environ.get(env)
         if not root:
@@ -2319,6 +2306,160 @@ def everything_walk(exe_name, valid, max_depth=8, steps=4):
                 break
             cur = up
     return ""
+
+
+# ---------------------------------------------------------------------------
+# 5.7 外部工具（外挂下载，不进仓库）
+# ---------------------------------------------------------------------------
+#
+# busybox64.exe 和 Everything 的 es.exe / Everything64.dll 都是第三方二进制。
+# 压成 base64 常量塞进源码（旧版就是这么干 busybox 的）会让仓库多出几 MB 不可读
+# 内容，还没法单独升级，所以改成用到时下载到用户目录：
+#
+#   <LOCALAPPDATA>/pojia-modifier/tools/busybox64.exe
+#   <LOCALAPPDATA>/pojia-modifier/tools/es.exe
+#   <LOCALAPPDATA>/pojia-modifier/tools/Everything64.dll
+#
+# 下载源：POJIA_TOOL_MIRROR 指向本地目录或 http(s) 基地址时优先用它（自建镜像、
+# 内网共享都行），否则用内置默认地址。拿不到就静默降级——缺工具只是少一条捷径，
+# 不许挡住主流程。
+
+TOOL_ENV = "POJIA_TOOL_MIRROR"
+TOOL_DEFAULTS = {
+    "busybox64.exe": ("https://frippery.org/files/busybox/busybox64.exe",),
+    "es.exe": ("https://www.voidtools.com/ES-1.1.0.27.zip",),
+    "Everything64.dll": ("https://www.voidtools.com/Everything-SDK.zip",),
+}
+TOOL_MEMBER = {                 # zip 包里的路径
+    "es.exe": "es.exe",
+    "Everything64.dll": "dll/Everything64.dll",
+}
+
+
+def user_dir():
+    """本工具的用户级目录。放下载来的外部工具，不进安装目录，升级不丢。"""
+    if IS_WIN:
+        base = os.environ.get("LOCALAPPDATA") or os.path.join(home(), "AppData", "Local")
+    else:
+        base = os.environ.get("XDG_DATA_HOME") or os.path.join(home(), ".local", "share")
+    return os.path.join(base, VAULT_APP)
+
+
+def tools_dir():
+    return os.path.join(user_dir(), "tools")
+
+
+def tool_path(name):
+    return os.path.join(tools_dir(), name) if name else ""
+
+
+def tool_present(name):
+    path = tool_path(name)
+    return bool(path) and os.path.isfile(long_path(path)) and os.path.getsize(long_path(path)) > 0
+
+
+def _tool_bytes(src, name):
+    """从一个来源取字节。本地目录直接读，http 走 urllib。失败给 None。"""
+    if not src:
+        return None
+    if os.path.isdir(long_path(src)):
+        return read_bytes(os.path.join(src, name))
+    if not re.match(r"^https?://", src, re.I):
+        return None
+    url = src if src.endswith("/") else src + "/"
+    try:
+        import urllib.request
+    except ImportError:
+        return None
+    try:
+        req = urllib.request.Request(url + name, headers={"User-Agent": VAULT_APP})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return resp.read()
+    except (OSError, ValueError):
+        return None
+
+
+def _tool_unpack(data, name):
+    """zip 里挑出要的那个文件；不是 zip 就原样返回。"""
+    if not data:
+        return None
+    if not data.startswith(b"PK\x03\x04"):
+        return data
+    import zipfile
+    want = TOOL_MEMBER.get(name, name).replace("\\", "/")
+    want_base = os.path.basename(want).lower()
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            for item in zf.namelist():
+                flat = item.replace("\\", "/")
+                if flat.lower() == want.lower() or os.path.basename(flat).lower() == want_base:
+                    return zf.read(item)
+    except (zipfile.BadZipFile, OSError, ValueError):
+        return None
+    return None
+
+
+def fetch_tool(name, quiet=True):
+    """把一个外部工具下载到用户目录。已经在就返回路径，拿不到返回空串。"""
+    if tool_present(name):
+        return tool_path(name)
+    sources = []
+    mirror = os.environ.get(TOOL_ENV, "").strip()
+    if mirror:
+        sources.append(mirror)
+    sources.extend(TOOL_DEFAULTS.get(name, ()))
+    if not sources:
+        return ""
+    for src in sources:
+        data = _tool_unpack(_tool_bytes(src, name), name)
+        if not data:
+            continue
+        dest = tool_path(name)
+        if not ensure_dir(os.path.dirname(dest)):
+            return ""
+        tmp = dest + ".part"
+        try:
+            with open(long_path(tmp), "wb") as fh:
+                fh.write(data)
+            os.replace(long_path(tmp), long_path(dest))
+        except OSError:
+            remove_file(tmp)
+            continue
+        if not quiet:
+            say("  已取到 %s（%d KB，来自 %s）" % (name, len(data) // 1024, src))
+        return dest
+    return ""
+
+
+def tool_rows():
+    """只读：每个外部工具一行 (名字, 有没有, 路径)。"""
+    return [(name, tool_present(name), tool_path(name)) for name in sorted(TOOL_DEFAULTS)]
+
+
+def do_fetch_tools(names=""):
+    """--fetch-tools：把外部工具拉到用户目录。全成功退 0。"""
+    want = [n.strip() for n in re.split(r"[,，\s]+", names or "") if n.strip()]
+    if not want:
+        want = sorted(TOOL_DEFAULTS)
+    bad = []
+    for name in want:
+        if name not in TOOL_DEFAULTS:
+            fail_msg("不认识的外部工具：%s（可选：%s）" % (name, "、".join(sorted(TOOL_DEFAULTS))))
+            bad.append(name)
+            continue
+        if tool_present(name):
+            say("  [已有] %-18s %s" % (name, tool_path(name)))
+            continue
+        got = fetch_tool(name, quiet=False)
+        if got:
+            say("  [完成] %-18s %s" % (name, got))
+        else:
+            fail_msg("%s 没取到：%s 或默认地址都不通"
+                     % (name, TOOL_ENV))
+            bad.append(name)
+    say("")
+    say("工具目录：%s" % tools_dir())
+    return 1 if bad else 0
 
 
 # ---------------------------------------------------------------------------
@@ -5262,6 +5403,8 @@ def build_parser():
     a("--git-bash", dest="git_bash", action="store_true", help="Git Bash 接管")
     a("--guard", dest="guard", nargs="?", const="status",
       choices=["install", "remove", "status"], help="运行时守卫：install / remove / status")
+    a("--fetch-tools", dest="fetch_tools", nargs="?", const="", metavar="NAMES",
+      help="下载外部工具（busybox64.exe / es.exe / Everything64.dll）到用户目录，不传就全要")
     a("--menu", action="store_true", help="进入交互菜单")
     a("--gui", action="store_true", help="进入图形界面")
     a("--version", action="store_true", help="显示版本")
@@ -5406,6 +5549,8 @@ def main(argv=None):
         return 0
     if o.guard:
         return do_guard(o.guard)
+    if o.fetch_tools is not None:
+        return do_fetch_tools(o.fetch_tools)
 
     return interactive_menu(ctx)
 
