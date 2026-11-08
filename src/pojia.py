@@ -43,8 +43,8 @@ import zlib
 # 0. 常量与运行时开关
 # ---------------------------------------------------------------------------
 
-VERSION = "1.01.8"              # 护照里只存这个，纯数字
-DISPLAY_VERSION = "1.01.8-beta"  # 界面上给人看的：跟 Release tag 一致
+VERSION = "1.01.9"              # 护照里只存这个，纯数字
+DISPLAY_VERSION = "1.01.9-beta"  # 界面上给人看的：跟 Release tag 一致
 APP = "POJIA"                   # 护照里的 tool 字段，磁盘契约，别改
 DISPLAY_NAME = "破甲修改器"      # 只用于对外文案
 
@@ -6702,6 +6702,15 @@ def update_download(assets, dst):
     return True, "%s（%d KB）" % (name, len(blob) // 1024)
 
 
+# 换装批处理里调系统工具一律带全路径。
+#
+# 启动器要是 Git Bash 那一套（PATH 里 usr\bin 排在 System32 前面），`find`
+# 命中的是 GNU 的 find.exe：`find /i "pojia-modifier.exe"` 在它眼里是「从
+# 路径 /i 开始遍历」，MSYS 再把 /i 翻成 I:\ —— 于是整个 I: 盘被扫一遍，
+# 用户看到的就是「升级卡在 find 上」。1.01.8 及以前就是这么挂的。
+WIN_SYS32 = r"%SystemRoot%\System32"
+
+
 def _swap_script(lines, name):
     """把一段批处理写到临时目录并跑起来（主进程退出后它才动手）。"""
     folder = os.environ.get("TEMP") or os.environ.get("TMP") or "."
@@ -6730,22 +6739,28 @@ def update_install(new_path):
         setup_exe = str(new_path).replace("/", "\\")
         bat = _swap_script([
             "@echo off",
+            # PATH 先钉回系统目录，后面每条命令再带全路径 —— 两道保险，少一道
+            # 都可能又走到别的 find.exe 上去（原因见 WIN_SYS32 上面的注释）。
+            f'set "PATH={WIN_SYS32};%SystemRoot%;%PATH%"',
             # 先给主进程一点时间自己退，退不掉就杀掉 —— 升级这条路上不能等它
             # 自己愿意。等到第 15 次（约 15 秒）还没走，直接 taskkill。
-            "ping -n 3 127.0.0.1 >nul",
+            f'"{WIN_SYS32}\\ping.exe" -n 3 127.0.0.1 >nul',
             "set /a n=0",
             ":wait",
-            'tasklist /fi "imagename eq %s" 2>nul | find /i "%s" >nul' % (exe, exe),
+            # /nh 去掉表头，再用 findstr /c: 做**字面**匹配：find 的 "x" 里那个点
+            # 是通配符，碰上 _update_pojia-modifier-..._setup.exe 这种名字会误判。
+            f'"{WIN_SYS32}\\tasklist.exe" /nh /fi "imagename eq {exe}" 2>nul | '
+            f'"{WIN_SYS32}\\findstr.exe" /i /c:"{exe}" >nul',
             "if errorlevel 1 goto swap",
             "set /a n+=1",
-            'if %%n%% GEQ 15 taskkill /f /im "%s" >nul 2>&1' % exe,
-            "ping -n 2 127.0.0.1 >nul",
+            f'if %n% GEQ 15 "{WIN_SYS32}\\taskkill.exe" /f /im "{exe}" >nul 2>&1',
+            f'"{WIN_SYS32}\\ping.exe" -n 2 127.0.0.1 >nul',
             "goto wait",
             ":swap",
             # /POJIA_SELFDEL：告诉安装程序「装完把自己删掉」。只有这条路由我们
             # 拉起来，别的 /S 不该被顺手删掉人家的文件。
-            'start /wait "" "%s" /S /POJIA_SELFDEL' % setup_exe,
-            'start "" "%s"' % me,
+            f'start /wait "" "{setup_exe}" /S /POJIA_SELFDEL',
+            f'start "" "{me}"',
             'del "%~f0"',
         ], "_pojia_update.bat")
         if not bat or not _run_detached(["cmd", "/c", bat]):
@@ -6758,19 +6773,20 @@ def update_install(new_path):
         setup_exe = str(new_path).replace("/", "\\")
         bat = _swap_script([
             "@echo off",
-            "ping -n 3 127.0.0.1 >nul",
+            f'set "PATH={WIN_SYS32};%SystemRoot%;%PATH%"',
+            f'"{WIN_SYS32}\\ping.exe" -n 3 127.0.0.1 >nul',
             "set /a n=0",
             ":wait",
-            'move /y "%s" "%s.old" >nul 2>&1' % (me, me),
+            f'move /y "{me}" "{me}.old" >nul 2>&1',
             "if not errorlevel 1 goto swap",
             "set /a n+=1",
-            'if %%n%% GEQ 15 taskkill /f /im "%s" >nul 2>&1' % os.path.basename(me),
-            "ping -n 2 127.0.0.1 >nul",
+            f'if %n% GEQ 15 "{WIN_SYS32}\\taskkill.exe" /f /im "{os.path.basename(me)}" >nul 2>&1',
+            f'"{WIN_SYS32}\\ping.exe" -n 2 127.0.0.1 >nul',
             "goto wait",
             ":swap",
-            'move /y "%s" "%s" >nul' % (setup_exe, me),
-            'del /f /q "%s.old" >nul 2>&1' % me,
-            'start "" "%s"' % me,
+            f'move /y "{setup_exe}" "{me}" >nul',
+            f'del /f /q "{me}.old" >nul 2>&1',
+            f'start "" "{me}"',
             'del "%~f0"',
         ], "_pojia_update.bat")
         if not bat or not _run_detached(["cmd", "/c", bat]):

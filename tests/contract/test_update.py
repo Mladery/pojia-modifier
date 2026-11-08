@@ -10,8 +10,12 @@
 update_download，然后看磁盘上的字节。被测的仍然是那几十行里的目录处理。
 """
 import os
+import re
 import subprocess
 import sys
+import time
+
+import pytest
 
 SNIPPET = r'''
 import sys, os
@@ -62,3 +66,75 @@ def test_update_download_keeps_existing_files(box):
     p = _download(box, dst)
     assert "RESULT True" in box.out(p), box.out(p)
     assert os.path.isfile(keep)
+
+
+# ---------------------------------------------------------------------------
+# 换装批处理的进程检测
+#
+# 1.01.8 的第二个坑：批处理里写的是 `tasklist | find /i "x"`。启动器要是
+# Git Bash 那一套（usr\bin 排在 System32 前面），`find` 命中的是 GNU 的，
+# `find /i "pojia-modifier.exe"` 在它眼里是「从路径 /i 开始遍历」，MSYS 再把
+# /i 翻成 I:\ —— 整个盘扫一遍。人看到的就是「升级卡在 find 上」。
+# ---------------------------------------------------------------------------
+
+BATCH_SNIPPET = r'''
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.abspath(sys.argv[1])))
+import pojia
+pojia.FROZEN = True
+pojia.SELF_EXE = r"C:\Users\t\AppData\Local\Programs\pojia-modifier\pojia-modifier.exe"
+pojia.install_meta = lambda: {"dir": r"C:\Users\t\AppData\Local\Programs\pojia-modifier"}
+pojia.setup_install_dir = lambda: ""
+lines = []
+pojia._swap_script = lambda ls, name: (lines.extend(ls), r"C:\temp\_x.bat")[1]
+pojia._run_detached = lambda argv: True
+pojia.update_install(r"C:\Users\t\state\_update_pojia-modifier-windows-x64-setup.exe")
+print("BATCH-BEGIN")
+for line in lines:
+    print(line)
+print("BATCH-END")
+'''
+
+
+def _batch_lines(box):
+    p = subprocess.run(
+        [sys.executable, "-c", BATCH_SNIPPET, box.prog],
+        cwd=box.root, env=box.env(),
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120,
+    )
+    text = box.out(p)
+    assert "BATCH-BEGIN" in text, text
+    body = text.split("BATCH-BEGIN", 1)[1].split("BATCH-END", 1)[0]
+    return [ln for ln in body.strip().splitlines() if ln.strip()]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="换装批处理只有 Windows 上有")
+def test_swap_batch_calls_system_tools_by_full_path(box):
+    """PATH 里只要有个同名程序，裸写 find/tasklist 就不是系统那个了。"""
+    lines = _batch_lines(box)
+    joined = "\n".join(lines)
+    assert not re.search(r"(^|[|&]\s*)find(\.exe)?\s", joined), joined
+    for tool in ("tasklist", "findstr", "taskkill", "ping"):
+        uses = [ln for ln in lines if tool in ln]
+        assert uses, "批处理里没用到 %s？" % tool
+        for ln in uses:
+            # 注意 %SystemRoot% 里的 % 要写成 %%：这一行本身用 % 拼字符串
+            want = "%%SystemRoot%%\\System32\\%s.exe" % tool
+            assert want in ln, ln
+    assert 'set "PATH=%SystemRoot%\\System32;' in joined
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="换装批处理只有 Windows 上有")
+def test_swap_batch_wait_loop_terminates(box, tmp_path):
+    """把 :swap 换成 echo 跑真循环：进程不在时几秒内必须走到 swap。"""
+    lines = _batch_lines(box)
+    head = lines[:lines.index(":swap")]
+    bat = tmp_path / "_wait.bat"
+    bat.write_text("\r\n".join(head + [":swap", "echo SWAP-REACHED"]) + "\r\n",
+                   encoding="mbcs")
+    t0 = time.time()
+    r = subprocess.run(["cmd", "/c", str(bat)],
+                       capture_output=True, text=True, timeout=90)
+    used = time.time() - t0
+    assert "SWAP-REACHED" in (r.stdout or ""), (r.stdout, r.stderr)
+    assert used < 20, "过了 %.1fs 才走到 swap，说明又在扫盘" % used

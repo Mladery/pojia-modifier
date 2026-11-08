@@ -261,10 +261,17 @@ Function .onInit
 
   ; 正在运行时覆盖文件会失败（_internal 里的 dll 被锁着）。静默模式是
   ; --update 拉起来的，那时主进程已经在退出，不查。
+  ;
+  ; 不用 `tasklist | find`：从 Git Bash 拉起来的安装程序，PATH 里排在前面的
+  ; find.exe 是 GNU 的，`find /i "x"` 会被它当成「从 /i 开始遍历」——整个盘扫
+  ; 一遍，安装程序在开装前就地卡住。这里直接调 tasklist 取输出，再用 StrStr
+  ; 找进程名：没有管道，也就不需要 cmd /c 去背那套引号规则。
   IfSilent on_init_done
-  nsExec::ExecToStack 'cmd /c tasklist /fi "imagename eq ${APP_EXE}" 2>nul | find /i "${APP_EXE}"'
+  nsExec::ExecToStack '"$SYSDIR\tasklist.exe" /nh /fi "imagename eq ${APP_EXE}"'
   Pop $0
-  ${If} $0 == 0
+  Pop $1
+  ${StrStr} $2 "$1" "${APP_EXE}"
+  ${If} $2 != ""
     MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION \
       "${APP_NAME} 正在运行。$\r$\n$\r$\n请先退出程序再继续，否则文件会被占用。" \
       IDOK on_init_done
