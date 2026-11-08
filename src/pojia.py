@@ -43,7 +43,7 @@ import zlib
 # ---------------------------------------------------------------------------
 
 VERSION = "1.0"                 # 护照里只存这个，纯数字
-DISPLAY_VERSION = "1.0"         # 界面上给人看的
+DISPLAY_VERSION = "1.0-mod"     # 界面上给人看的：跟 Release tag 一致（v1.0-mod）
 APP = "POJIA"                   # 护照里的 tool 字段，磁盘契约，别改
 DISPLAY_NAME = "破甲修改器"      # 只用于对外文案
 
@@ -1520,16 +1520,21 @@ ECHO_WORD = "\u7834\u7532\u81ea\u68c0"
 
 
 _ECHO_TPL = _ECHO_TPL = _crlf(_unpack(
-    "eNodzMFOg0AUBdA9X9Gkv2ZXLky60BhCMmPSMlhGNEKJ0ipVYxuCJamEUoH0Y5j3ZljxC067fPfde4bDgbITlVHDgOZZ+htk"
-    "e+CBnKXgPXWEtsQ1b67GF1ZLeF8zDHJcrrBgSDPwElw46vgCUSTKBH7CvnbB4fD4gGEMk0JUc5hOYHtoCdUJxra8O/S1g2Fx"
-    "anoJRG/wxUU565Yf2hElUStXv0TJ1TcVVSWaQK0/O/teC1pWG3Kizg6yuUxT8efKNVdZjr9BX78ahoxz6e9gv5P+OwasbxYy"
-    "2urFwLwc3Vr6NK9HY+sfPjulEw=="
+    "eNodzMFOg0AUBdA9X2HSX9OdiQmJuiAkg0llsIxoKCUKKFVjG4JiKqG0QPoxzHszrPgFpy7fffeeyeRE2pksLE2DzhfzNdIt"
+    "sEDMcvAeB2L1xDWuL/RTsydsbCkGJSZLrChaBXgZxo48PEEU8TqDr3BsXXAYPNxjmMK04s0CbqfwveuJpRJMbXGzG1sHw+rY"
+    "9DKIXuCD8Xo2JG/K4TWRS1e9eM3kp8WbhneBXL0P9p0SlCzX5Ej9O0gXIs/53hUrJosSf4OxfdY0kZZivoHtRsxfMaBjFwuH"
+    "YpwbV2e6qS7e+LD3If6BhKiBcamfm3+zI6/C"
 ))
 
 
 def echo_section(short_key, version=None):
-    ver = version or VERSION
-    return _ECHO_TPL.format(word=ECHO_WORD, key=short_key, ver=ver)
+    """自证串：跑的是哪一版、从哪个仓库来的，一眼可见。
+
+    short_key 不占串里的位置：冒烟与截图要的是版本号与出处，目标短名留着给
+    护照和 --status，那两处随时查得到。
+    """
+    ver = version or DISPLAY_VERSION
+    return _ECHO_TPL.format(word=ECHO_WORD, key=short_key, ver=ver, url=UPDATE_REPO)
 
 
 # --------------------------------------------------------------- 人格

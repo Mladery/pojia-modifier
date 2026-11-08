@@ -35,10 +35,14 @@ MARK = "__POJIA_PAYLOAD_BELOW__"
 
 
 def core_version():
-    """从源码读 VERSION。版本号只写一处，别处都是读出来的。"""
+    """从源码读对外版本号。版本号只写一处，别处都是读出来的。
+
+    优先 DISPLAY_VERSION（安装横幅、install.json 用它），没有再退回 VERSION。
+    """
     with open(SRC_PY, encoding="utf-8", errors="replace") as f:
         s = f.read()
-    ver = re.search(r'^VERSION\s*=\s*"([^"]+)"', s, re.M)
+    ver = (re.search(r'^DISPLAY_VERSION\s*=\s*"([^"]+)"', s, re.M)
+           or re.search(r'^VERSION\s*=\s*"([^"]+)"', s, re.M))
     return ver.group(1) if ver else "0.0"
 
 

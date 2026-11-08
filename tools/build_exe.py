@@ -126,13 +126,18 @@ def hidden_imports(*sources):
 
 
 def build_version(src):
-    """从核心脚本里读对外版本号。"""
+    """从核心脚本里读对外版本号。
+
+    优先 DISPLAY_VERSION（带 `-mod` 这类后缀，界面横幅与 `--version` 用它），
+    没有再退回 VERSION。护照里存的仍是纯数字那一份，两者用途不同。
+    """
     try:
         with open(src, "r", encoding="utf-8", errors="ignore") as f:
             txt = f.read()
     except OSError:
         return ""
-    m = re.search(r'^VERSION\s*=\s*"([^"]+)"', txt, re.M)
+    m = (re.search(r'^DISPLAY_VERSION\s*=\s*"([^"]+)"', txt, re.M)
+         or re.search(r'^VERSION\s*=\s*"([^"]+)"', txt, re.M))
     return m.group(1) if m else ""
 
 

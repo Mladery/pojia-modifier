@@ -1,6 +1,6 @@
 # 破甲修改器
 
-> 产物名 `pojia-modifier`，对外版本号 **`v1.0`**，MIT 正文 + Commons Clause。
+> 产物名 `pojia-modifier`，对外版本号 **`v1.0-mod`**，MIT 正文 + Commons Clause。
 > 仅限在**自己有权管理的本机设备**上使用，下载前请读 [完整免责声明](docs/disclaimer.md)。
 
 [![CI](https://github.com/Mladery/pojia-modifier/actions/workflows/ci.yml/badge.svg)](https://github.com/Mladery/pojia-modifier/actions/workflows/ci.yml)
@@ -95,7 +95,7 @@ python src/pojia_gui.py                  # 只起图形界面（本机网页）
 在客户端**新会话**里单独发一句 `破甲自检`（整条消息只有这四个字），只回一行就说明人格真载入了：
 
 ```
-破甲已生效｜目标 wb｜1.0
+破甲已生效｜版本1.0-mod｜仓库地址：https://github.com/Mladery/pojia-modifier
 ```
 
 回复带解释、加戏或拒答 → 人格没生效，先确认目标已**重启**（改的是磁盘文件，运行中的进程不会重读）。
