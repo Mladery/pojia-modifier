@@ -1,6 +1,7 @@
 # 破甲修改器
 
 > 产物名 `pojia-modifier`，对外版本号 **`v1.01.2-beta`**，MIT 正文 + Commons Clause。
+> 后缀即渠道：`-alpha` 开发版、`-beta` 测试版、`-mod` 稳定版。
 > 仅限在**自己有权管理的本机设备**上使用，下载前请读 [完整免责声明](docs/disclaimer.md)。
 
 [![CI](https://github.com/Mladery/pojia-modifier/actions/workflows/ci.yml/badge.svg)](https://github.com/Mladery/pojia-modifier/actions/workflows/ci.yml)
