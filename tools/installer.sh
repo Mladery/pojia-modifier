@@ -198,8 +198,12 @@ fi
 mv "$NEW" "$PREFIX" || die "落位失败"
 chmod +x "$PREFIX/$APP"
 
+# 记真实路径（pwd -P）：macOS 上 /var 指向 /private/var，安装目录常常落在
+# /var/folders/... 下，而程序启动后系统给它的 exe 路径是 /private/var/...。
+# 两个字符串不一样、指的却是同一个目录 —— 记字面路径会让程序认不出「我装过」。
+PREFIX_REAL=$(cd "$PREFIX" 2>/dev/null && pwd -P) || PREFIX_REAL="$PREFIX"
 cat > "$PREFIX/install.json" <<EOF
-{"prefix": "$PREFIX", "version": "$VERSION", "asset": "$ASSET", "installed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+{"prefix": "$PREFIX_REAL", "version": "$VERSION", "asset": "$ASSET", "installed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
 EOF
 
 mkdir -p "$BIN_DIR" || die "建不了 $BIN_DIR"

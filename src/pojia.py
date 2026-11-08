@@ -92,7 +92,13 @@ DISCOVERED_NAME = "discovered.json"
 SNAPSHOT_NAME = "snapshot.json"
 PERSONA_SET_NAME = "persona-set.json"
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# 冻结态（PyInstaller）里 __file__ 指向的是包内的模块：单文件版在临时解包目录里，
+# 目录版在 _internal/ 里 —— 都不是用户双击的那个 exe。状态、备份、护照、install.json、
+# 换装，全都得对着 exe 所在的目录：放解包目录里，单文件版退出即丢，目录版升级时
+# 整个 _internal/ 会被新包替换掉，用户数据跟着没。
+FROZEN = bool(getattr(sys, "frozen", False))
+SELF_EXE = os.path.abspath(sys.executable if FROZEN else __file__)
+SCRIPT_DIR = os.path.dirname(SELF_EXE)
 STATE_DIR = os.path.join(SCRIPT_DIR, STATE_DIRNAME)
 
 IS_WIN = os.name == "nt"
@@ -163,6 +169,23 @@ def same(a, b):
     if IS_WIN:
         return norm(a) == norm(b)
     return os.path.abspath(a) == os.path.abspath(b)
+
+
+def same_dir(a, b):
+    """同一个目录吗 —— 软链也要认。
+
+    macOS 的 /var 指向 /private/var：安装时 shell 拿到的是 /var/folders/...，程序
+    启动后系统给的 exe 路径是 /private/var/folders/...。两个字符串不一样，指的却是
+    同一个目录。只按字面比会把「装好的」当成「没装」。
+    """
+    if not a or not b:
+        return False
+    if same(a, b):
+        return True
+    try:
+        return same(os.path.realpath(a), os.path.realpath(b))
+    except (OSError, ValueError):
+        return False
 
 
 # --------------------------------------------------------------- 输出
@@ -6413,8 +6436,8 @@ def _swap_script(lines, name):
 
 def update_install(new_path):
     """换装。-> (ok, 说明)。源码运行时只报告不替换。"""
-    me = os.path.abspath(__file__)
-    if not getattr(sys, "frozen", False):
+    me = SELF_EXE
+    if not FROZEN:
         return False, "源码运行时只提示不替换，新版留着：%s" % new_path
     if IS_WIN and install_meta():
         exe = os.path.basename(me)
@@ -6816,14 +6839,19 @@ def install_meta():
     if not isinstance(data, dict) or not data:
         return {}
     prefix = str(data.get("prefix") or "")
-    if prefix and norm(prefix) != norm(SCRIPT_DIR):
+    if prefix and not same_dir(prefix, SCRIPT_DIR):
         return {}
     return data
 
 
 def install_dir():
-    meta = install_meta()
-    return os.path.abspath(str(meta.get("prefix") or SCRIPT_DIR)) if meta else ""
+    """安装目录。没装就返回空串。
+
+    一律返回 SCRIPT_DIR 而不是 install.json 里那条路径：两者指同一个目录，
+    但记账那条可能是软链写法（macOS 的 /var 与 /private/var），删文件、报路径
+    得跟程序自己看到的一致。
+    """
+    return SCRIPT_DIR if install_meta() else ""
 
 
 def our_links():
