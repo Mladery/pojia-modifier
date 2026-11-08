@@ -49,7 +49,7 @@ def core_version():
     """从源码读 VERSION，省得版本号在三个地方各写一遍。
 
     这里**必须**用纯数字那一个：NSIS 的 VIProductVersion 只吃 `X.X.X.X`，
-    塞进 `1.0-mod` 会直接编译失败。带后缀的对外版本号在别处显示。
+    塞进 `1.01-beta` 会直接编译失败。带后缀的对外版本号在别处显示。
     """
     path = os.path.join(ROOT, "src", "pojia.py")
     with open(path, encoding="utf-8", errors="replace") as f:

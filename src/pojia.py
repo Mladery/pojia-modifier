@@ -36,14 +36,15 @@ import subprocess
 import sys
 import time
 import traceback
+import unicodedata
 import zlib
 
 # ---------------------------------------------------------------------------
 # 0. 常量与运行时开关
 # ---------------------------------------------------------------------------
 
-VERSION = "1.0"                 # 护照里只存这个，纯数字
-DISPLAY_VERSION = "1.0-mod"     # 界面上给人看的：跟 Release tag 一致（v1.0-mod）
+VERSION = "1.01"                # 护照里只存这个，纯数字
+DISPLAY_VERSION = "1.01-beta"   # 界面上给人看的：跟 Release tag 一致
 APP = "POJIA"                   # 护照里的 tool 字段，磁盘契约，别改
 DISPLAY_NAME = "破甲修改器"      # 只用于对外文案
 
@@ -238,9 +239,85 @@ def _harden_stdio():
             pass
 
 
-def say(text=""):
+def say(text="", color=""):
     if not OPT["quiet"]:
-        _emit(text)
+        _emit(paint(text, color))
+
+
+# ---- 控制台：颜色 / 中文对齐 / 清屏
+#
+# 上不上色只看一条：stdout 是不是真终端。管道那头是界面面板、CI、重定向文件 ——
+# 往那里塞 \033[92m 只会变成乱码，所以非终端一律纯文本。Windows 还得额外打开
+# VT 处理，否则老 conhost 会把转义序列原样打出来。
+
+_ANSI = {"r": "\033[0m", "g": "\033[92m", "y": "\033[93m", "c": "\033[96m",
+         "dg": "\033[90m", "red": "\033[91m", "b": "\033[1m"}
+ANSI_ON = [False]
+
+
+def init_ansi():
+    """决定这一趟要不要上色。解析完参数、知道 quiet 之后调一次。"""
+    ANSI_ON[0] = False
+    if OPT["quiet"]:
+        return
+    try:
+        if not sys.stdout.isatty():
+            return
+    except Exception:
+        return
+    if IS_WIN:
+        try:
+            import ctypes
+            k = ctypes.windll.kernel32
+            h = k.GetStdHandle(-11)
+            mode = ctypes.c_uint32()
+            if not k.GetConsoleMode(h, ctypes.byref(mode)):
+                return
+            if not k.SetConsoleMode(h, mode.value | 0x0004):
+                return
+        except Exception:
+            return
+    ANSI_ON[0] = True
+
+
+def paint(text, color=""):
+    if not color or not ANSI_ON[0]:
+        return text
+    return _ANSI.get(color, "") + text + _ANSI["r"]
+
+
+def dwidth(text):
+    """显示宽度：中日韩全角算 2，用来把中英混排的表对齐。"""
+    return sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+               for ch in str(text))
+
+
+def fit(text, width):
+    """按显示宽度补空格（或截断加省略号）。纯 len() 对齐中英混排一定歪。"""
+    text = str(text)
+    w = dwidth(text)
+    if w <= width:
+        return text + " " * (width - w)
+    out, cur = "", 0
+    for ch in text:
+        cw = 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+        if cur + cw > width - 1:
+            break
+        out += ch
+        cur += cw
+    out += "…"
+    return out + " " * max(0, width - dwidth(out))
+
+
+def hint(text):
+    """下一步提示。只在真终端里出现 —— 面板、管道、CI 里这些行是噪音。"""
+    if OPT["quiet"] or not ANSI_ON[0]:
+        return
+    _emit(paint("  ▸ " + text, "dg"))
+
+
+def rule(width=66, color="dg"):
+    _emit(paint("─" * width, color))
 
 
 def info(text):
@@ -2720,14 +2797,44 @@ def preset_row_text(plugins_block):
     return head + plugins_block + "\n# <<< " + PRESET_MARK + "\n"
 
 
+_BLOCK_SCALAR = re.compile(r"(?:^|\s)[|>][+-]?\d?\s*(?:#.*)?$")
+
+
 def yaml_balance_ok(text):
-    """没有 PyYAML 时的兜底检查：括号、引号配平，行首不许有 tab。"""
+    """没有 PyYAML 时的兜底检查：括号、引号配平，行首不许有 tab。
+
+    有三类内容必须放过 —— 它们里的引号、括号跟 YAML 结构无关，硬数一定误判：
+
+    - **块标量**（`prefix: |` 下面那一整段是原文）。DSH 的 standard 预设里就有一段
+      `prefix: |` 的英文说明，写满了 `user's`、`don't`，那个撇号会被当成左引号一路
+      开到文件尾 —— 于是合规的预设被判成「引号没配平」，整个 preset 模式拒绝落盘
+      （打包版没有 PyYAML，走的就是这条路）。
+    - **`!!js` 值**：后面跟的是 JavaScript，`process.platform === 'win32'` 这种
+      单双引号混用是常态。
+    - **整行注释**。
+    """
     depth = 0
     quote = ""
-    for line in (text or "").split("\n"):
-        stripped = line.lstrip(" ")
-        if stripped.startswith("\t"):
+    block_indent = None
+    for raw in (text or "").split("\n"):
+        line = raw.rstrip("\r")
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip(" "))
+        if block_indent is not None:
+            if not stripped:
+                continue
+            if indent > block_indent:
+                continue
+            block_indent = None
+        if line.lstrip(" ").startswith("\t"):
             return False
+        if not stripped or stripped.startswith("#"):
+            continue
+        if _BLOCK_SCALAR.search(line):
+            block_indent = indent
+            continue
+        if "!!js" in line:
+            continue
         i = 0
         while i < len(line):
             ch = line[i]
@@ -6547,15 +6654,19 @@ def update_hint():
 # ---------------------------------------------------------------------------
 
 MENU_ACTIONS = [
-    ("1", "注入", "apply"),
-    ("2", "撤回", "revert"),
-    ("3", "检测状态", "status"),
-    ("4", "体检", "check"),
-    ("5", "生成快照", "snapshot"),
-    ("6", "与上次快照对比", "compare"),
-    ("7", "清理（撤回全部并删除状态）", "purge"),
-    ("0", "退出", "quit"),
+    ("1", "看现状", "status", "只读：每个目标装没装、注没注"),
+    ("2", "预演", "dryrun", "只报会改哪些文件，一个字节都不写"),
+    ("3", "破甲", "apply", "真改，改前自动旁路备份"),
+    ("4", "还原", "revert", "变回原版，备份留着"),
+    ("5", "体检", "check", "磁盘 / 凭证 / 自证就绪，只读"),
+    ("6", "快照", "snapshot", "存一份基准，之后能跟它比"),
+    ("7", "对比", "compare", "跟上次基准比，看哪变了"),
+    ("8", "守护", "guard", "后台守卫任务：安装 / 卸载 / 查看"),
+    ("9", "清理", "purge", "撤回全部并删除状态目录"),
+    ("0", "退出", "quit", ""),
 ]
+
+_READONLY_ACTS = ("status", "check", "snapshot", "compare")
 
 
 def _target_line(t, ctx):
@@ -6565,57 +6676,141 @@ def _target_line(t, ctx):
     return t.status(root, ctx)[0]
 
 
+def _status_color(label):
+    """状态上色：灰=没装，绿=当前，黄=过期或缺件，红=其它异常。"""
+    if not label or label.startswith("未安装"):
+        return "dg"
+    if "当前" in label:
+        return "g"
+    if "过期" in label or "缺" in label:
+        return "y"
+    return "red"
+
+
+def _menu_summary(ctx):
+    """菜单顶上那行：装了几个、几个真生效。"""
+    installed = live = 0
+    for t in TARGETS:
+        try:
+            st = _target_line(t, ctx)
+        except (OSError, ValueError):
+            st = "未安装"
+        if st and not st.startswith("未安装"):
+            installed += 1
+            if "当前" in st:
+                live += 1
+    return installed, live
+
+
+def _menu_draw(ctx):
+    installed, live = _menu_summary(ctx)
+    say("")
+    say("  " + paint("%s %s" % (DISPLAY_NAME, DISPLAY_VERSION), "b")
+        + paint("   把客户端的内置提示词换成你自己那份", "dg"))
+    say("  " + paint("%d 个目标：已装 %d · 已生效 %d"
+                     % (len(TARGETS), installed, live), "dg"))
+    rule()
+    for num, label, _act, desc in MENU_ACTIONS:
+        tag = paint("[%s]" % num, "dg" if num == "0" else "c")
+        say("  %s %s %s" % (tag, fit(label, 8), paint(desc, "dg") if desc else ""))
+    rule()
+    say("  " + paint("选 1-9；回车重画，0 退出", "dg"))
+
+
+def _menu_ask(prompt):
+    """读一行。Ctrl+C / Ctrl+D 当退出处理，返回 None。"""
+    try:
+        return input(paint(prompt, "g"))
+    except (EOFError, KeyboardInterrupt):
+        return None
+
+
+def _confirm(text):
+    raw = _menu_ask("  %s (y/N) " % text)
+    return (raw or "").strip().lower() in ("y", "yes")
+
+
+def wait_enter(text="按回车返回菜单"):
+    if OPT["quiet"]:
+        return
+    try:
+        input(paint("\n  " + text + "…", "dg"))
+    except (EOFError, KeyboardInterrupt):
+        pass
+
+
+def _menu_guard():
+    raw = _menu_ask("  1) 安装  2) 卸载  3) 查看   选择：")
+    mode = {"1": "install", "2": "remove", "3": "status"}.get((raw or "").strip())
+    if not mode:
+        return 0
+    return do_guard(mode)
+
+
+def _menu_run(ctx, act):
+    if act == "guard":
+        return _menu_guard()
+    if act in _READONLY_ACTS:
+        targets = list(TARGETS)
+    else:
+        targets = pick_targets(ctx)
+        if not targets:
+            say(paint("  没有选中任何目标。", "y"))
+            return 0
+    if act == "purge" and not _confirm("撤回全部目标，并删除状态目录？"):
+        say("  已取消。")
+        return 0
+    if act == "dryrun":
+        old = OPT["dry"]
+        OPT["dry"] = True
+        try:
+            return do_apply(ctx, targets)
+        finally:
+            OPT["dry"] = old
+    fn = {"status": do_status, "check": do_check, "snapshot": do_snapshot,
+          "compare": do_compare, "apply": do_apply, "revert": do_revert,
+          "purge": do_purge}.get(act)
+    return fn(ctx, targets) if fn else 0
+
+
 def interactive_menu(ctx):
     if not sys.stdin or not sys.stdin.isatty():
         fail_msg("当前不是交互终端，请直接给参数（例如 --apply --target claude）")
         return 1
+    acts = dict((n, a) for n, _l, a, _d in MENU_ACTIONS)
     while True:
-        say("")
-        say("%s %s — 批量注入 + 可逆撤回" % (APP, DISPLAY_VERSION))
-        for num, label, _act in MENU_ACTIONS:
-            say("  %s) %s" % (num, label))
-        try:
-            choice = input("选择：").strip()
-        except (EOFError, KeyboardInterrupt):
+        _menu_draw(ctx)
+        raw = _menu_ask("选择 [0-9]：")
+        if raw is None:
             say("")
             return 0
-        act = dict((n, a) for n, _l, a in MENU_ACTIONS).get(choice)
-        if not act or act == "quit":
+        choice = raw.strip().lstrip("\ufeff")
+        if choice in ("0", "q", "Q", "quit", "exit"):
             return 0
-        picked = pick_targets(ctx)
-        if not picked:
-            say("没有选中任何目标。")
+        if not choice:
             continue
-        if act == "apply":
-            return do_apply(ctx, picked)
-        if act == "revert":
-            return do_revert(ctx, picked)
-        if act == "status":
-            return do_status(ctx, picked)
-        if act == "check":
-            return do_check(ctx, picked)
-        if act == "snapshot":
-            return do_snapshot(ctx, picked)
-        if act == "compare":
-            return do_compare(ctx, picked)
-        if act == "purge":
-            return do_purge(ctx, picked)
+        act = acts.get(choice)
+        if not act:
+            say(paint("  没有「%s」这一项。" % choice, "y"))
+            continue
+        _menu_run(ctx, act)
+        wait_enter()
 
 
 def pick_targets(ctx):
     say("")
-    say("目标（回车=按默认选择，逗号分隔序号，a=全部）：")
+    say("  " + paint("要处理哪些？回车=默认已装的，a=全部，也可写 1,3 或 dsh,wb", "dg"))
     rows = []
     for i, t in enumerate(TARGETS, 1):
-        rows.append((i, t, _target_line(t, ctx)))
-        say("  %2d) %-12s %-22s %s" % (i, t.key, t.name, rows[-1][2]))
-    try:
-        raw = input("选择：").strip()
-    except (EOFError, KeyboardInterrupt):
-        return []
-    if not raw:
+        st = _target_line(t, ctx)
+        rows.append((i, t, st))
+        say("  %s %s %s %s" % (paint("[%2d]" % i, "dg"), fit(t.key, 11),
+                               fit(t.name, 22), paint(st, _status_color(st))))
+    raw = _menu_ask("选择：")
+    if raw is None or not raw.strip():
         default = [t for _i, t, st in rows if st not in ("未安装", "缺失")]
         return default or [t for _i, t, _s in rows]
+    raw = raw.strip().lstrip("\ufeff")
     if raw.lower() == "a":
         return [t for _i, t, _s in rows]
     out = []
@@ -6632,7 +6827,6 @@ def pick_targets(ctx):
             if t:
                 out.append(t)
     return out
-
 
 def _gui_script():
     """找界面脚本。
@@ -6746,6 +6940,10 @@ def do_apply(ctx, targets):
                 t.restart(t.root)
     elif not OPT["dry"] and ok:
         say("请完全退出 WorkBuddy（含托盘）再重开，改动才生效；要自动重启用 --restart-wb。")
+    if ok and OPT["dry"]:
+        hint("确认没问题就去掉 --dry-run 再跑一次，真落盘")
+    elif ok:
+        hint("到客户端新会话里发「破甲自检」验证；不满意就 --revert")
     if failed:
         say("怎么修：看上面每个 [失败] 行的路径与原因；路径不对就用 --<目标>-dir 手动指定。")
         return 1
@@ -6779,6 +6977,8 @@ def do_revert(ctx, targets):
     log_flush()
     say("")
     say("撤回：成功 %d / 失败 %d" % (ok, failed))
+    if ok and not failed:
+        hint("备份还留着，想连记录一起清掉就用 --purge")
     return 1 if failed else 0
 
 
@@ -6828,6 +7028,7 @@ def do_status(ctx, targets):
             for line in t.detail_rows(root, ctx):
                 say("      %s" % line)
     say("")
+    hint("预演一下会改哪些文件：--dry-run --apply")
     return 0
 
 
@@ -7219,6 +7420,7 @@ def main(argv=None):
     OPT["kill_dsh"] = bool(o.kill_dsh)
     OPT["diagnose"] = bool(o.diagnose)
     collect_explicit(o)
+    init_ansi()
 
     if o.version:
         _emit("%s %s（pojia-modifier）" % (DISPLAY_NAME, DISPLAY_VERSION))
