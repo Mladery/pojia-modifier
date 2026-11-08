@@ -43,8 +43,8 @@ import zlib
 # 0. 常量与运行时开关
 # ---------------------------------------------------------------------------
 
-VERSION = "1.01"                # 护照里只存这个，纯数字
-DISPLAY_VERSION = "1.01-beta"   # 界面上给人看的：跟 Release tag 一致
+VERSION = "1.01.2"              # 护照里只存这个，纯数字
+DISPLAY_VERSION = "1.01.2-beta"  # 界面上给人看的：跟 Release tag 一致
 APP = "POJIA"                   # 护照里的 tool 字段，磁盘契约，别改
 DISPLAY_NAME = "破甲修改器"      # 只用于对外文案
 
@@ -2926,8 +2926,12 @@ def preset_state(config_root):
     return "none", "破甲模式：未注册（--dsh-mode preset 装上）"
 
 
-def preset_install(config_root, install_root, prefix_text, dry=False):
-    """-> (ok, 说明)。只写 profile 的 cordis.patch.yml，不碰官方文件。"""
+def preset_install(config_root, install_root, prefix_text, dry=False, label="DSH"):
+    """-> (ok, 说明)。只写 profile 的 cordis.patch.yml，不碰官方文件。
+
+    预演时按文件逐个报「会写 <路径>」，跟其它目标一个口径 —— 只给一句
+    「desktop 将插入」看不出到底动哪些文件，等于没预演。
+    """
     profs = profile_dirs(config_root)
     if not profs:
         return False, "没有 profiles/*/cordis.patch.yml（非桌面版布局），破甲模式不适用"
@@ -2954,19 +2958,22 @@ def preset_install(config_root, install_root, prefix_text, dry=False):
         if not ok:
             return False, "%s 生成的内容 YAML 解析不过（%s），已跳过这一份" % (tag, why or "结构不对")
         if dry:
+            say("[预演] %s：会写 %s（%s%s）"
+                % (label, yml, tag, " 重写" if has else " 新增"))
             done.append(tag + (" 将重写" if has else " 将插入"))
             continue
         ensure_backup(yml, ".dshpreset.bak", "")
         if not write_text(yml, new, bom, eol):
             return False, "%s 写不进去" % tag
         done.append(tag + (" 已重写" if has else " 已插入"))
-    head = "破甲模式将写入" if dry else "破甲模式已写入"
-    tail = "" if dry else "，重启 DSH 后新建任务即可在模式下拉里选「%s」" % PRESET_NAME
-    return True, "%s（%s）%s" % (head, "、".join(done), tail)
+    if dry:
+        return True, "破甲模式将写入 %d 个 profile（见上面逐个文件）" % len(done)
+    return True, "破甲模式已写入（%s），重启 DSH 后新建任务即可在模式下拉里选「%s」" \
+        % ("、".join(done), PRESET_NAME)
 
 
-def preset_remove(config_root, dry=False):
-    """-> (ok, 说明)。只删带标记的那一段。"""
+def preset_remove(config_root, dry=False, label="DSH"):
+    """-> (ok, 说明)。只删带标记的那一段。预演时逐文件报「会删」，同 preset_install。"""
     profs = profile_dirs(config_root)
     if not profs:
         return True, "没有 profiles/*，无需移除"
@@ -2978,6 +2985,7 @@ def preset_remove(config_root, dry=False):
         if text is None or ("id: " + PRESET_ROW) not in text:
             continue
         if dry:
+            say("[预演] %s：会从 %s 删掉标记段" % (label, yml))
             done.append(tag + " 将移除")
             continue
         ensure_backup(yml, ".dshpreset.bak", "")
@@ -2991,6 +2999,8 @@ def preset_remove(config_root, dry=False):
         done.append(tag + " 已移除")
     if not done:
         return True, "破甲模式未注册，无需移除"
+    if dry:
+        return True, "破甲模式将从 %d 个 profile 移除（见上面逐个文件）" % len(done)
     return True, "破甲模式已移除（%s）" % "、".join(done)
 
 
@@ -5341,19 +5351,20 @@ class DshTarget(Target):
     def apply_preset(self, ctx, root):
         """preset 模式只登记一个模式，不改任何官方文件。"""
         text = PRESET_INTRO + "\n\n" + assemble(ctx.persona, self.key)
-        ok, note = preset_install(self.config_root(), root, text, OPT["dry"])
+        ok, note = preset_install(self.config_root(), root, text, OPT["dry"],
+                                  label="DSH")
         if not ok:
             return Res(False, "failed", note)
         return Res(True, "dry" if OPT["dry"] else "applied", note)
 
     def revert(self, ctx, root):
         if OPT["dsh_mode"] == "preset":
-            ok, note = preset_remove(self.config_root(), OPT["dry"])
+            ok, note = preset_remove(self.config_root(), OPT["dry"], label="DSH")
             status = "failed" if not ok else ("dry" if OPT["dry"] else "reverted")
             return Res(ok, status, note)
         res = super(DshTarget, self).revert(ctx, root)
         if preset_installed(self.config_root()):
-            ok, note = preset_remove(self.config_root(), OPT["dry"])
+            ok, note = preset_remove(self.config_root(), OPT["dry"], label="DSH")
             say("  [预设] %-12s %s" % (self.key, note))
         if gitbash_installed(self.config_root()):
             ok, note = gitbash_remove(self.config_root(), OPT["dry"])
@@ -6903,7 +6914,8 @@ def do_apply(ctx, targets):
             continue
         if res.ok and res.status in ("applied", "dry"):
             ok += 1
-            say("  [完成] %-12s %s" % (t.key, res.msg))
+            tag = "预演" if res.status == "dry" else "完成"
+            say("  [%s] %-12s %s" % (tag, t.key, res.msg))
             if res.status == "applied":
                 t.after_apply(root)
         elif res.ok:
@@ -6933,7 +6945,10 @@ def do_apply(ctx, targets):
                         "要清就明说：--clean-spill 只清过期那批，--purge-spill 全清。")
     log_flush()
     say("")
-    say("注入：成功 %d / 跳过 %d / 失败 %d" % (ok, skipped, failed))
+    if OPT["dry"]:
+        say("预演：会改 %d / 跳过 %d / 失败 %d（一个字节都没动）" % (ok, skipped, failed))
+    else:
+        say("注入：成功 %d / 跳过 %d / 失败 %d" % (ok, skipped, failed))
     if OPT["restart_wb"]:
         for t in targets:
             if isinstance(t, WorkBuddyTarget) and getattr(t, "root", ""):
@@ -6968,7 +6983,8 @@ def do_revert(ctx, targets):
             continue
         if res.ok:
             ok += 1
-            say("  [完成] %-12s %s" % (t.key, res.msg))
+            tag = "预演" if res.status == "dry" else "完成"
+            say("  [%s] %-12s %s" % (tag, t.key, res.msg))
             if res.status != "dry":
                 t.after_revert(root)
         else:
@@ -6976,7 +6992,10 @@ def do_revert(ctx, targets):
             fail_msg("%-12s %s" % (t.key, res.msg))
     log_flush()
     say("")
-    say("撤回：成功 %d / 失败 %d" % (ok, failed))
+    if OPT["dry"]:
+        say("预演：会撤 %d / 失败 %d（一个字节都没动）" % (ok, failed))
+    else:
+        say("撤回：成功 %d / 失败 %d" % (ok, failed))
     if ok and not failed:
         hint("备份还留着，想连记录一起清掉就用 --purge")
     return 1 if failed else 0

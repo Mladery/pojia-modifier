@@ -45,6 +45,18 @@ def find_makensis():
     return ""
 
 
+def quad_version(ver):
+    """把版本号归一成 NSIS 认的四段数字。
+
+    `VIProductVersion` 只吃 X.X.X.X，每段 0-65535。版本号里带 `-beta`、或者段数
+    不是四段（1.01.2），直接拼进去会让 makensis 编译失败 —— 传进去之前先归一。
+    """
+    parts = [str(int(p)) for p in re.split(r"[.\-+]", str(ver or "")) if p.isdigit()]
+    while len(parts) < 4:
+        parts.append("0")
+    return ".".join(parts[:4])
+
+
 def core_version():
     """从源码读 VERSION，省得版本号在三个地方各写一遍。
 
@@ -150,6 +162,7 @@ def main():
 
     cmd = [mk, "/V2",
            "/DVERSION=%s" % ver,
+           "/DVERSION4=%s" % quad_version(ver),
            "/DSRCDIR=%s" % src,
            "/DOUTFILE=%s" % out,
            "/DLICENSE=%s" % lic,

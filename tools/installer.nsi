@@ -60,8 +60,12 @@ BrandingText "${APP_NAME} ${VERSION}"
 ShowInstDetails show
 ShowUninstDetails show
 
-; NSIS 要求四段 X.X.X.X。VERSION 是 "1.0"，补两个 0 就是 1.0.0.0。
-VIProductVersion "${VERSION}.0.0"
+; NSIS 只认四段 X.X.X.X，而对外版本号可能带 -beta 或不是四段。
+; 归一在 tools/build_installer.py 的 quad_version() 里做，这里直接用。
+!ifndef VERSION4
+  !define VERSION4 "0.0.0.0"
+!endif
+VIProductVersion "${VERSION4}"
 VIAddVersionKey "ProductName"      "${APP_NAME}"
 VIAddVersionKey "FileDescription"  "${APP_NAME} 安装程序"
 VIAddVersionKey "FileVersion"      "${VERSION}"
