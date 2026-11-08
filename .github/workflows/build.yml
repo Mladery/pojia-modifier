@@ -191,50 +191,19 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      # 打 tag 时才发 Release。先 view 再 create，多个 job 并发跑也不会互相踩；
-      # 上传用 --clobber，重跑同一个 tag 能覆盖旧产物。
+      # 打 tag 时才发 Release。六个 job 会抢着建同一个 Release，重试和
+      # 「已经有人建好了」的判定全在 tools/publish_release.sh 里 ——
+      # 1.01.7 就栽在这上面：linux-x64 走 create 分支撞 already_exists 直接退出，
+      # Linux 的裸二进制于是从 Release 里漏了，checksums 也跟着被跳过。
       - name: 发布到 Release
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ github.ref_name }}"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG 已被并发 job 建好，这里只上传产物"
-          else
-            # 有手写的发布说明就用它，没有才退回自动生成 —— 自动生成会把
-            # 从第一个提交起的全部 commit 标题堆上来，对使用者没意义。
-            NOTES="docs/release-notes/$TAG.md"
-            if [ -f "$NOTES" ]; then
-              gh release create "$TAG" --title "破甲修改器 ${TAG#v}" --notes-file "$NOTES"
-            else
-              gh release create "$TAG" --title "破甲修改器 ${TAG#v}" --generate-notes
-            fi
-          fi
-
-          # 上传产物。用 out/* 而不是具体文件名：macOS 那边一次出两个
-          # （裸二进制 + 安装器），写死名字会漏掉其中一个，而漏掉的恰好是
-          # 安装版用户 --update 要下的那个。
-          gh release upload "$TAG" out/* --clobber
-
-          # 最后强制「已发布」。删过 tag 再重推、或者 release 建得比 tag 早的时候，
-          # gh 会把它留在**草稿**态 —— 草稿在 Releases 页面公开访问时看不到，用户
-          # 只会看到一个空页面，以为发布挂了。发布过的再 edit 一次是无害的。
-          # 版本后缀定渠道：-alpha / -beta 是预发布，-mod 才是稳定版。
-          # 预发布必须标出来，否则 /releases/latest 会把它当正式版，
-          # 稳定版用户也会被提示「有新版本」，装上去就成了 beta。
-          case "$TAG" in
-            *-alpha*|*-beta*) gh release edit "$TAG" --draft=false --prerelease ;;
-            *) gh release edit "$TAG" --draft=false --prerelease=false ;;
-          esac
-
-          # 发布说明跟着仓库走：Release 早于说明改动的（比如先发后补），重跑一次
-          # 就同步过来，不用手动去网页上贴。
-          NOTES="docs/release-notes/$TAG.md"
-          if [ -f "$NOTES" ]; then
-            gh release edit "$TAG" --notes-file "$NOTES"
-          fi
+          # 用 out/* 而不是具体文件名：macOS 那边一次出两个（裸二进制 + 安装器），
+          # 写死名字会漏掉其中一个，而漏掉的恰好是安装版用户 --update 要下的那个。
+          bash tools/publish_release.sh "${{ github.ref_name }}" out/*
 
   # Windows 安装程序。目录形态的产物 + NSIS = 一个 setup.exe。
   #
@@ -414,23 +383,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ github.ref_name }}"
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            NOTES="docs/release-notes/$TAG.md"
-            if [ -f "$NOTES" ]; then
-              gh release create "$TAG" --title "破甲修改器 ${TAG#v}" --notes-file "$NOTES" || true
-            else
-              gh release create "$TAG" --title "破甲修改器 ${TAG#v}" --generate-notes || true
-            fi
-          fi
-          gh release upload "$TAG" out/*.exe --clobber
-          # 版本后缀定渠道：-alpha / -beta 是预发布，-mod 才是稳定版。
-          # 预发布必须标出来，否则 /releases/latest 会把它当正式版，
-          # 稳定版用户也会被提示「有新版本」，装上去就成了 beta。
-          case "$TAG" in
-            *-alpha*|*-beta*) gh release edit "$TAG" --draft=false --prerelease || true ;;
-            *) gh release edit "$TAG" --draft=false --prerelease=false || true ;;
-          esac
+          # 建 Release / 传产物 / 标预发布全在脚本里，重试和 already_exists 都在那儿处理。
+          bash tools/publish_release.sh "${{ github.ref_name }}" out/*.exe
 
   # Linux 安装包。和 Windows 的 setup 对位：装到 ~/.local/share/pojia-modifier，
   # 免 root，再跑一次就是升级，卸载交给程序自己的 --uninstall。
@@ -519,23 +473,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ github.ref_name }}"
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            NOTES="docs/release-notes/$TAG.md"
-            if [ -f "$NOTES" ]; then
-              gh release create "$TAG" --title "破甲修改器 ${TAG#v}" --notes-file "$NOTES" || true
-            else
-              gh release create "$TAG" --title "破甲修改器 ${TAG#v}" --generate-notes || true
-            fi
-          fi
-          gh release upload "$TAG" out/* --clobber
-          # 版本后缀定渠道：-alpha / -beta 是预发布，-mod 才是稳定版。
-          # 预发布必须标出来，否则 /releases/latest 会把它当正式版，
-          # 稳定版用户也会被提示「有新版本」，装上去就成了 beta。
-          case "$TAG" in
-            *-alpha*|*-beta*) gh release edit "$TAG" --draft=false --prerelease || true ;;
-            *) gh release edit "$TAG" --draft=false --prerelease=false || true ;;
-          esac
+          # 建 Release / 传产物 / 标预发布全在脚本里，重试和 already_exists 都在那儿处理。
+          bash tools/publish_release.sh "${{ github.ref_name }}" out/*
 
   # 四个平台的产物汇总成一份校验和。Windows 走签名验签，另外三个平台只有
   # SHA-256 这一条路 —— 所以这份文件是它们唯一的完整性凭据。
