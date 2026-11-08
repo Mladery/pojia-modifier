@@ -61,12 +61,23 @@ def core_version():
     """从源码读 VERSION，省得版本号在三个地方各写一遍。
 
     这里**必须**用纯数字那一个：NSIS 的 VIProductVersion 只吃 `X.X.X.X`，
-    塞进 `1.01-beta` 会直接编译失败。带后缀的对外版本号在别处显示。
+    塞进 `1.01-beta` 会直接编译失败。带后缀的对外版本号走 display_version()。
     """
     path = os.path.join(ROOT, "src", "pojia.py")
     with open(path, encoding="utf-8", errors="replace") as f:
         m = re.search(r'^VERSION\s*=\s*"([^"]+)"', f.read(), re.M)
     return m.group(1) if m else "0.0"
+
+
+def display_version(default=""):
+    """界面文字里用的版本号（1.01.4-beta）。读不到就退回纯数字。"""
+    path = os.path.join(ROOT, "src", "pojia.py")
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            m = re.search(r'^DISPLAY_VERSION\s*=\s*"([^"]+)"', f.read(), re.M)
+    except OSError:
+        return default
+    return m.group(1) if m else default
 
 
 LICENSE_MD = os.path.join(ROOT, "docs", "disclaimer.md")
@@ -162,6 +173,7 @@ def main():
 
     cmd = [mk, "/V2",
            "/DVERSION=%s" % ver,
+           "/DDISPLAYVER=%s" % display_version(ver),
            "/DVERSION4=%s" % quad_version(ver),
            "/DSRCDIR=%s" % src,
            "/DOUTFILE=%s" % out,

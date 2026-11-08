@@ -79,3 +79,6 @@ dist/
 
 # pytest --basetemp 产物
 /.pt*/
+
+# 打包产物（setup.exe 等），由 tools/build_installer.py 生成
+/out/

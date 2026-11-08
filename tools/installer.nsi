@@ -3,8 +3,17 @@
 ; 拿 onedir 产物打一个 setup.exe：解到 %LOCALAPPDATA%\Programs\pojia-modifier，
 ; 建开始菜单项、登记卸载项、可选桌面图标和 PATH。
 ;
-; 同一个 setup 既是安装器也是升级器：第二次运行读到 HKCU 里的 InstallDir，就
-; 装回原处、跳过目录页、标题改成「更新」，不产生第二份。
+; 同一个 setup 既是安装器也是升级器：第二次运行读到 HKCU 里的 InstallDir，
+; 就装回原处、跳过目录页、不产生第二份。
+;
+; 「已经装过」这件事要让用户一眼看出来，不能还摆一张「欢迎使用安装程序」的
+; 脸。但也不能为这件事在向导之前再加一个弹窗 —— 多一个「确定」就多一次点击，
+; 而且那个框跟向导的第一页说的是同一件事。所以改的是这一页自己的字：
+; 标题、正文、任务栏、安装进度页、完成页，凡是「安装」的位置，升级时都写
+; 「升级」，正文里还带上「从哪个版本升到哪个版本」。整条路上只有向导本身。
+;
+; 装完把下载的安装包删掉（完成页第二个复选框，默认勾上）。删的是「正在运行的
+; 那个 exe」—— Windows 不给删，所以交给一个等两秒的批处理，本进程退了它才动手。
 ;
 ; 为什么是 onedir 而不是单文件：单文件版每次启动都要把自身解包到 %TEMP%\
 ; _MEIxxxxxx，有些机器的安全软件不放行在临时目录建可执行文件，启动即报
@@ -35,6 +44,11 @@ ${UnStrRep}
 
 !ifndef VERSION
   !define VERSION "0.0"
+!endif
+; 给人看的版本号（1.01.4-beta）。VERSION 只能是纯数字，VIProductVersion 只吃
+; 四段数字；而界面上写「升到 1.01.4」会让 beta 用户以为装错了包。
+!ifndef DISPLAYVER
+  !define DISPLAYVER "${VERSION}"
 !endif
 !ifndef SRCDIR
   !define SRCDIR "build\dist-onedir\pojia-modifier"
@@ -83,14 +97,31 @@ Var DoRevert
 !define MUI_FINISHPAGE_LINK "项目主页"
 !define MUI_FINISHPAGE_LINK_LOCATION "${APP_URL}"
 
+; 完成页的第二个复选框：把这个安装包删掉。
+; MUI 只给两个复选框位置（RUN 和 SHOWREADME），没有「自定义复选框」这种插槽，
+; 所以借 SHOWREADME 的位置挂自己的回调 —— 文案和动作都是自己的，跟 readme 无关。
+;
+; 默认勾上：不定义 _NOTCHECKED 就是勾选态。装完还留着几十兆的 setup.exe，
+; 大多数人不会自己去删，攒几个版本就是一堆同名文件。
+!define MUI_FINISHPAGE_SHOWREADME "$EXEPATH"
+!define MUI_FINISHPAGE_SHOWREADME_TEXT "删除这个安装包（已经装好了，留着占地方）"
+!define MUI_FINISHPAGE_SHOWREADME_FUNCTION DeleteSetup
+
 ; 组件页默认是「左边一窄条列表、右边一块描述」，四条选项在窄条里会被截成
 ; 「加入 PATH（命令行直接…」。改成列表占满整行、描述挪到下面一行，宽度就够
 ; 了。代价是描述只剩一条，所以下面每条描述都压到一句话。
 !define MUI_COMPONENTSPAGE_SMALLDESC
 
-; MUI2 自己占着 .onGUIInit，改标题要走它的钩子。
-!define MUI_CUSTOMFUNCTION_GUIINIT PojiaGuiInit
+; MUI2 自己占着 .onGUIInit。这里不改标题 —— MUI 在这个钩子之后还会按
+; $(^SetupCaption) 重写一次，写在钩子里会被立刻盖掉。标题统一放到每页的
+; SHOW 回调里改（那时窗口已经在，也没人再改它）。
 
+; 欢迎页照旧出，但升级时这一页的文字要换成「升级」。
+;
+; MUI 的标题和正文是编译期定死的字符串，只有拿到控件句柄之后才改得动 ——
+; 所以挂 SHOW 回调，在对话框建好、还没显示的那一瞬间把两个标签重写一遍。
+; 这样不用自己画一页，也不会在向导前面多出任何弹窗。
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW WelcomePageShow
 !insertmacro MUI_PAGE_WELCOME
 
 ; 协议页。正文是 docs/免责声明.md 转成的纯文本，由 build_installer.py 生成后
@@ -110,13 +141,24 @@ Var DoRevert
 !define MUI_PAGE_CUSTOMFUNCTION_PRE LicensePagePre
 !insertmacro MUI_PAGE_LICENSE "${LICENSE}"
 
+; 组件页也要改标题：NSIS 每建一页都按「Name + ^SetupCaption」重写一次窗口标题，
+; 上一页改过的会被盖回去。
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW ComponentsPageShow
 !insertmacro MUI_PAGE_COMPONENTS
 
 ; 升级时不让人再选目录：装到别处就是两份，PATH 和卸载项各指一处。
 ; 这个 define 只作用于紧随其后的那一个页面宏，所以必须贴着 DIRECTORY 放。
 !define MUI_PAGE_CUSTOMFUNCTION_PRE DirPagePre
 !insertmacro MUI_PAGE_DIRECTORY
+
+; 进度页的抬头默认是「正在安装 破甲修改器」。升级时改成「正在升级」——
+; 这一页停留时间最长，抬头写着安装，前面几页就白改了。
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW InstFilesShow
 !insertmacro MUI_PAGE_INSTFILES
+
+; 完成页的标题和正文按「装」还是「更新」现改 —— MUI 的这两段文字是编译期
+; 定死的，只有拿到控件句柄之后才能换。不换的话，升级完还写着「安装完成」。
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW FinishPageShow
 !insertmacro MUI_PAGE_FINISH
 
 ; 还原的询问放在「确认卸载」之后：先问要不要卸，再问卸之前要不要把改动退回去。
@@ -197,25 +239,85 @@ SectionEnd
 
 Function .onInit
   ; 已经装过就装回原处：同一个 setup，第一次是安装，第二次就是更新。
+  ;
+  ; 判定不能只看注册表：卸载程序被强删、注册表被清理工具扫掉，程序目录还在，
+  ; 那也算「已装」—— 不然会在旁边再摊一份，PATH 和卸载项指哪个都说不清。
   ReadRegStr $0 HKCU "${APP_KEY}" "InstallDir"
+  ${If} $0 == ""
+    ${If} ${FileExists} "$LOCALAPPDATA\Programs\${APP_ID}\${APP_EXE}"
+      StrCpy $0 "$LOCALAPPDATA\Programs\${APP_ID}"
+    ${EndIf}
+  ${EndIf}
+
   ${If} $0 != ""
     StrCpy $INSTDIR $0
-    StrCpy $IsUpgrade 1
-    ReadRegStr $OldVer HKCU "${APP_KEY}" "Version"
+    ; 目录在、exe 不在 = 上次没卸干净。照常装到这儿，但不算「更新」——
+    ; 没有可更新的东西，也就别弹「正在运行」之外的提示。
+    ${If} ${FileExists} "$0\${APP_EXE}"
+      StrCpy $IsUpgrade 1
+      ReadRegStr $OldVer HKCU "${APP_KEY}" "Version"
+    ${EndIf}
   ${EndIf}
 
   ; 正在运行时覆盖文件会失败（_internal 里的 dll 被锁着）。静默模式是
   ; --update 拉起来的，那时主进程已经在退出，不查。
-  IfSilent done
+  IfSilent on_init_done
   nsExec::ExecToStack 'cmd /c tasklist /fi "imagename eq ${APP_EXE}" 2>nul | find /i "${APP_EXE}"'
   Pop $0
   ${If} $0 == 0
     MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION \
       "${APP_NAME} 正在运行。$\r$\n$\r$\n请先退出程序再继续，否则文件会被占用。" \
-      IDOK done
+      IDOK on_init_done
     Abort
   ${EndIf}
-  done:
+
+  on_init_done:
+  ; 注册表被清理工具扫过时读不到旧版本号，欢迎页正文得有个说法。
+  ${If} $IsUpgrade == 1
+  ${AndIf} $OldVer == ""
+    StrCpy $OldVer "旧版"
+  ${EndIf}
+FunctionEnd
+
+Function SetUpgradeCaption
+  ; 窗口标题（任务栏上那行）。只在升级时改：安装时 MUI 给的
+  ; 「破甲修改器 安装」是对的。
+  ${If} $IsUpgrade == 1
+    System::Call 'user32::SetWindowTextW(i $HWNDPARENT, w "${APP_NAME} 升级")'
+  ${EndIf}
+FunctionEnd
+
+Function WelcomePageShow
+  Call SetUpgradeCaption
+  ; 升级时把这一页的字改成「升级」。标签是 MUI 建的，句柄就摆在
+  ; $mui.WelcomePage.Title / .Text 里，SHOW 回调运行时已经有效。
+  ;
+  ; 正文压到三小段：MUI 给这块文字留的高度是固定的，写长了会被掐掉下半截。
+  ${If} $IsUpgrade != 1
+    Return
+  ${EndIf}
+  SendMessage $mui.WelcomePage.Title ${WM_SETTEXT} 0 "STR:欢迎使用 ${APP_NAME} 升级程序"
+  SendMessage $mui.WelcomePage.Text ${WM_SETTEXT} 0 "STR:已检测到 $OldVer，将就地升级到 ${DISPLAYVER}。$\r$\n备份、状态和你的设置都留在原处。$\r$\n$\r$\n升级前请先关闭正在运行的 ${APP_NAME}，否则文件会被占用。$\r$\n$\r$\n点击 [下一步(N)] 继续。"
+FunctionEnd
+
+Function ComponentsPageShow
+  Call SetUpgradeCaption
+FunctionEnd
+
+Function InstFilesShow
+  Call SetUpgradeCaption
+  ; 进度页抬头默认写「正在安装」。这一页停得最久，不换掉，前面几页就白换了。
+  ${If} $IsUpgrade != 1
+    Return
+  ${EndIf}
+  GetDlgItem $0 $HWNDPARENT 1037
+  ${If} $0 != 0
+    SendMessage $0 ${WM_SETTEXT} 0 "STR:正在升级 ${APP_NAME}"
+  ${EndIf}
+  GetDlgItem $0 $HWNDPARENT 1038
+  ${If} $0 != 0
+    SendMessage $0 ${WM_SETTEXT} 0 "STR:覆盖旧版文件，备份和设置都保留"
+  ${EndIf}
 FunctionEnd
 
 Function LicensePagePre
@@ -233,13 +335,50 @@ Function DirPagePre
   ${EndIf}
 FunctionEnd
 
-Function PojiaGuiInit
+Function FinishPageShow
+  Call SetUpgradeCaption
+  ; 升级完还写着「安装完成」，跟欢迎页是同一个毛病：把升级说成安装。
   ${If} $IsUpgrade == 1
-    ${If} $OldVer == ""
-      StrCpy $OldVer "旧版"
-    ${EndIf}
-    System::Call 'user32::SetWindowTextW(i $HWNDPARENT, w "更新 ${APP_NAME}：$OldVer → ${VERSION}")'
+    SendMessage $mui.FinishPage.Title ${WM_SETTEXT} 0 "STR:升级完成"
+    SendMessage $mui.FinishPage.Text ${WM_SETTEXT} 0 "STR:已升级到 ${DISPLAYVER}。备份、状态和你的设置都在原处。"
   ${EndIf}
+FunctionEnd
+
+Function DeleteSetup
+  ; 删掉「正在运行的自己」。Windows 不给删已加载的 exe，所以写一个守在旁边的
+  ; 批处理：它先等两秒，等本进程退出后再动手；删不掉就再等，最多三十次
+  ; （杀毒软件刚扫完的那几十秒会把文件锁住）。批处理自己最后把自己也删掉。
+  ;
+  ; 静默安装也从这里走 —— 那条路没有完成页，也就没有那个复选框。
+  ${IfNot} ${FileExists} "$EXEPATH"
+    Return
+  ${EndIf}
+  StrCpy $0 "$TEMP\pojia-del-setup.cmd"
+  ClearErrors
+  FileOpen $1 "$0" w
+  ${If} ${Errors}
+    Return
+  ${EndIf}
+  FileWrite $1 "@echo off$\r$\n"
+  FileWrite $1 "set TARGET=$EXEPATH$\r$\n"
+  FileWrite $1 "for /l %%i in (1,1,30) do ($\r$\n"
+  FileWrite $1 '  del /f /q "%TARGET%" >nul 2>&1$\r$\n'
+  FileWrite $1 '  if not exist "%TARGET%" goto done$\r$\n'
+  FileWrite $1 "  ping -n 2 127.0.0.1 >nul$\r$\n"
+  FileWrite $1 ")$\r$\n"
+  FileWrite $1 ":done$\r$\n"
+  FileWrite $1 'del /f /q "%~f0" >nul 2>&1$\r$\n'
+  FileClose $1
+  ExecShell "" "$0" SW_HIDE
+FunctionEnd
+
+Function .onInstSuccess
+  ; 非静默的装完由完成页那个复选框决定删不删；静默的没人可问，直接清掉
+  ; —— 那个 setup.exe 是 --update 自己下到临时目录里的，留着只是垃圾。
+  IfSilent del_ok
+  Return
+  del_ok:
+  Call DeleteSetup
 FunctionEnd
 
 ; ---- 卸载 -------------------------------------------------------------------
