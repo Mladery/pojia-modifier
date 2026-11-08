@@ -206,22 +206,34 @@ def _emit(text, stream=None):
 
 
 def _harden_stdio():
-    """把输出流设成「编不出来的字换成占位符」，而不是抛异常。
+    """控制台统一按 UTF-8 走：切代码页，再把两条流钉死成 UTF-8。
 
-    为什么必须做：`--help` 是 argparse 自己往 sys.stdout 写的，绕开了 _emit 的兜底。
-    在英文 Windows 上（控制台代码页 1252）帮助文本里的中文会让它抛
-    UnicodeEncodeError，于是 `--help` 直接崩 —— 输出被重定向到文件或管道时也是
-    一样，编码跟着 locale 走而不是跟着控制台。
+    两件事，缺一件中文就花：
 
-    只放宽错误策略，不动编码本身：中文控制台照常显示中文，英文控制台显示「?」，
-    两种都不会中断。
+    1. Windows 上把控制台代码页切到 65001。中文 Windows 的控制台默认 936，
+       程序输出的是 UTF-8 字节，控制台按 936 解释 —— 屏幕上就是方块和问号。
+    2. stdout / stderr 无条件 reconfigure 成 UTF-8。打包成 exe 之后
+       PYTHONIOENCODING 不起作用（解释器被嵌进引导器，环境变量不参与流初始化），
+       管道一侧会退回 locale（cp936），而读管道的那一头 —— 界面面板、CI、
+       重定向后的编辑器 —— 按 UTF-8 解，同样是花屏。自己钉死，不指望环境变量。
+
+    errors="replace" 是兜底：真编不出来的字（生僻字、emoji）换占位符，别让一行
+    输出把整条命令弄崩 —— `--help` 是 argparse 直接往 stdout 写的，绕不过兜底。
     """
+    if IS_WIN:
+        try:
+            import ctypes
+            k = ctypes.windll.kernel32
+            k.SetConsoleOutputCP(65001)
+            k.SetConsoleCP(65001)
+        except Exception:
+            pass
     for name in ("stdout", "stderr"):
         stream = getattr(sys, name, None)
         if stream is None:
             continue
         try:
-            stream.reconfigure(errors="replace")
+            stream.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
 
@@ -7157,6 +7169,10 @@ def resolve_targets(spec_list):
             if piece:
                 keys.append(piece)
     if not keys:
+        return list(TARGETS), ""
+    # `all` / `*` 当成「全都来」：界面上一个都没勾的时候就是这么传的，
+    # 命令行里也是顺手就会敲的词。不给它开这条路，用户只会看到「未知目标」。
+    if any(k.lower() in ("all", "*") for k in keys):
         return list(TARGETS), ""
     out = []
     bad = []
