@@ -43,8 +43,8 @@ import zlib
 # 0. 常量与运行时开关
 # ---------------------------------------------------------------------------
 
-VERSION = "1.01.5"              # 护照里只存这个，纯数字
-DISPLAY_VERSION = "1.01.5-beta"  # 界面上给人看的：跟 Release tag 一致
+VERSION = "1.01.6"              # 护照里只存这个，纯数字
+DISPLAY_VERSION = "1.01.6-beta"  # 界面上给人看的：跟 Release tag 一致
 APP = "POJIA"                   # 护照里的 tool 字段，磁盘契约，别改
 DISPLAY_NAME = "破甲修改器"      # 只用于对外文案
 
@@ -6562,7 +6562,7 @@ def http_get(url, timeout=8):
 
 def update_asset():
     """当前平台该下哪个资产。装过就下安装器，绿色版就下单文件。"""
-    installed = bool(install_meta())
+    installed = bool(install_meta() or setup_install_dir())
     if IS_WIN:
         return ("pojia-modifier-windows-x64-setup.exe" if installed
                 else "pojia-modifier-windows-x64.exe")
@@ -6682,7 +6682,7 @@ def update_install(new_path):
     me = SELF_EXE
     if not FROZEN:
         return False, "源码运行时只提示不替换，新版留着：%s" % new_path
-    if IS_WIN and install_meta():
+    if IS_WIN and (install_meta() or setup_install_dir()):
         exe = os.path.basename(me)
         # cmd 里统一用反斜杠：路径万一是拼出来的（状态目录带正斜杠），
         # start 会把正斜杠当成开关。
@@ -6711,19 +6711,30 @@ def update_install(new_path):
             return False, "安排静默安装失败，请手动运行 %s" % new_path
         return True, "已安排升级：程序会自己退出，装完自动打开"
     if IS_WIN:
+        # 绿色版没有安装器可借，只能等这个 exe 松手再把新文件挪过去。
+        # 等的上限跟安装器那条一样：15 秒还不退就杀掉，别让人对着黑窗口干等。
+        # 换完把 .old 删掉 —— 那是上一版，留着就是一个没人会用的同名文件。
+        setup_exe = str(new_path).replace("/", "\\")
         bat = _swap_script([
             "@echo off",
-            "ping -n 4 127.0.0.1 >nul",
+            "ping -n 3 127.0.0.1 >nul",
+            "set /a n=0",
             ":wait",
             'move /y "%s" "%s.old" >nul 2>&1' % (me, me),
-            "if errorlevel 1 (ping -n 2 127.0.0.1 >nul & goto wait)",
-            'move /y "%s" "%s" >nul' % (new_path, me),
+            "if not errorlevel 1 goto swap",
+            "set /a n+=1",
+            'if %%n%% GEQ 15 taskkill /f /im "%s" >nul 2>&1' % os.path.basename(me),
+            "ping -n 2 127.0.0.1 >nul",
+            "goto wait",
+            ":swap",
+            'move /y "%s" "%s" >nul' % (setup_exe, me),
+            'del /f /q "%s.old" >nul 2>&1' % me,
             'start "" "%s"' % me,
             'del "%~f0"',
         ], "_pojia_update.bat")
         if not bat or not _run_detached(["cmd", "/c", bat]):
             return False, "安排替换失败，请手动把 %s 覆盖到 %s" % (new_path, me)
-        return True, "已安排替换，本进程退出后自动换装并重启"
+        return True, "已安排替换：程序会自己退出，换完再打开"
     try:
         os.replace(long_path(new_path), long_path(me))
         return True, "已替换，重新运行就是新版"
@@ -7273,6 +7284,26 @@ def do_purge(ctx, targets):
 INSTALL_META = "install.json"
 INSTALL_PROGRAM_FILES = ("pojia-modifier.exe", "pojia-modifier", "_internal",
                          INSTALL_META, "_update.sh", "_update.bat", "unins000.exe")
+
+
+def setup_install_dir():
+    """NSIS 装出来的目录；没装返回空串。
+
+    Windows 安装器不写 install.json —— 那是 unix 安装器的账本，它只登记
+    HKCU 里的 InstallDir。更新这条路必须认它：不然用 setup 装出来的程序
+    永远把自己当绿色版，升级去下那个 12 MB 的便携 exe，丢进 onedir 目录
+    把 exe 换掉，_internal 一整套就成了没人再用的死文件。
+    """
+    if not IS_WIN:
+        return ""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Mladery\pojia-modifier") as key:
+            prefix = str(winreg.QueryValueEx(key, "InstallDir")[0] or "")
+    except (OSError, ImportError, IndexError):
+        return ""
+    return prefix if prefix and same_dir(prefix, SCRIPT_DIR) else ""
 
 
 def install_meta():

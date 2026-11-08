@@ -310,7 +310,7 @@ async function run(action){
     /* 升级已经安排好了：服务端马上自己退出，这个页面随即断线。
        与其让人对着一个加载不出来的页面发呆，不如盖一层说清楚 ——
        顺便试一下关掉自己（有的浏览器不让关不是脚本打开的标签，关不掉就算了）。 */
-    if (action === "update" && plain.indexOf("已安排升级") >= 0){
+    if (action === "update" && plain.indexOf("已安排") >= 0){
       showUpgrading();
     } else {
       /* 输出在「运行记录」页，跑完得把人送回来，并且在这一页写清成没成。

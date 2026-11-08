@@ -472,7 +472,9 @@ class Handler(BaseHTTPRequestHandler):
         # 升级安排好了：这个进程得自己退场，否则批处理永远等不到文件解锁，
         # 用户的印象就是「点了没反应」。批处理那边还有 taskkill 兜底，
         # 这里先体面地走 —— 页面上的最后一行说明它会自己重开。
-        if action == "update" and code == 0 and "已安排升级" in "".join(tail):
+        # 两种换装都算：「已安排升级」（装过的，走安装器）和「已安排替换」
+        # （绿色版，直接挪文件）。两条路都必须让这个进程先退场。
+        if action == "update" and code == 0 and "已安排" in "".join(tail):
             try:
                 self.wfile.write(
                     "\n程序即将退出，安装完成后会自动重新打开。\n".encode("utf-8"))
