@@ -43,8 +43,8 @@ import zlib
 # 0. 常量与运行时开关
 # ---------------------------------------------------------------------------
 
-VERSION = "1.03.1"              # 护照里只存这个，纯数字
-DISPLAY_VERSION = "1.03.1-beta"  # 界面上给人看的：跟 Release tag 一致
+VERSION = "1.04.1"              # 护照里只存这个，纯数字
+DISPLAY_VERSION = "1.04.1-beta"  # 界面上给人看的：跟 Release tag 一致
 APP = "POJIA"                   # 护照里的 tool 字段，磁盘契约，别改
 DISPLAY_NAME = "破甲修改器"      # 只用于对外文案
 
@@ -1685,6 +1685,23 @@ def assemble(persona_text, short_key, version=None):
 
 def hash_header(h):
     return "<!-- %s%s -->" % (HASH_PREFIX, h)
+
+
+def policy_core(persona_text, short_key):
+    """替换式注入装进 <content_policy> 的正文。
+
+    与 assemble() 只差一样：不含覆盖层与自证段 —— 那两样在模板里各有归宿
+    （<system_reminder> 与文末自证小节），塞进 content_policy 就又成了两份。
+    """
+    parts = [hash_header(persona_hash(persona_text))]
+    if persona_text:
+        parts.append(persona_text)
+    parts.append(POLICY_BODY)
+    addendum = ADDENDA.get(short_key)
+    if addendum:
+        parts.append(addendum)
+    parts.append(HARDENING)
+    return "\r\n\r\n".join(p.strip("\r\n") for p in parts if p is not None)
 
 
 # ---------------------------------------------------------------------------
@@ -3758,7 +3775,7 @@ def strip_blocks(text):
     return text
 
 
-# 块外的旧自证小节：更早的分支（社区版 8.65 / pojia-ce）往同一批模板里写过一份
+# 块外的旧自证小节：上一代工具（8.65 / pojia-ce）往同一批模板里写过一份
 # 「自证」说明，但它不带本工具的标记，strip_blocks 删不到。本工具的块里自带一份
 # 新的，两份并存时模型可能挑到旧的那条 —— 于是「破甲自检」回的还是上一代口令。
 # 注入前先把它清掉，块内那份不动。
@@ -3873,6 +3890,161 @@ def put_block(text, block):
     for start, end in reversed(blocks[1:]):
         tail = tail[:start - shift] + tail[end - shift:]
     return text[:first_start] + block + "\n" + tail
+
+
+# --------------------------------------------------------------- 替换式注入
+#
+# 客户端真正吃的是模板里原生那两段：<content_policy> 装政策、<system_reminder>
+# 装覆盖声明。往文末追加一块，只会让两份政策并存 —— 每轮请求为两份付 token，
+# 口径还互相打架，模型经常照原生那份走，「破甲自检」就回上一代口令。
+# 所以原生位置替换：content_policy 换正文、system_reminder 换覆盖层，文末只留
+# 一段自证。
+#
+# 不跟着做的两处：整份云记忆档案重建（用户自己的记忆会被冲掉），这里只换
+# Memory Block 段；哈希前缀沿用自己那套 pjm:h=。
+
+POLICY_OPEN = "<content_policy>"
+POLICY_CLOSE = "</content_policy>"
+REMIND_OPEN = "<system_reminder>"
+REMIND_CLOSE = "</system_reminder>"
+ECHO_HEADING = "## 自证"
+
+
+def _nl_of(text):
+    """按文件自己的行尾走，别把 CRLF 文件改成 LF。"""
+    return "\r\n" if "\r\n" in text[:4000] else "\n"
+
+
+ECHO_HEAD_RE = re.compile(r"(?m)^##[^\n]*(?:自证|口令|安装回执)[^\n]*\r?\n")
+NEXT_HEAD_RE = re.compile(r"(?m)^## ")
+
+
+def strip_echo_section(text):
+    """删掉所有自证小节（本工具的 `## 自证`、上一代的 `## 操作者自证口令`）。
+
+    按小节删而不是按行删：从标题行一直吃到下一个二级标题或文件尾。上一代在
+    product.json 里把这一段堆了 12 份（每轮写一份、从不删旧的），逐行删会留下
+    悬空的说明句。
+
+    用正则逐段抠、不按行 split：模板里常是 CRLF 与 LF 混着的，先 split 再 join
+    会把整份文件的行尾洗一遍。
+    """
+    if not text:
+        return text
+    out = text
+    while True:
+        m = ECHO_HEAD_RE.search(out)
+        if not m:
+            break
+        nxt = NEXT_HEAD_RE.search(out, m.end())
+        end = nxt.start() if nxt else len(out)
+        out = out[:m.start()] + out[end:]
+    return out.rstrip()
+
+
+def policy_patch(text, core, overlay, echo):
+    """把原生段换成我们的正文。没有 <content_policy> 段就返回 None（不是提示词模板）。"""
+    i = text.find(POLICY_OPEN)
+    if i < 0:
+        return None
+    j = text.find(POLICY_CLOSE, i + len(POLICY_OPEN))
+    if j < 0:
+        return None
+    nl = _nl_of(text)
+
+    def body(s):
+        return s.replace("\r\n", "\n").replace("\n", nl).strip("\n")
+
+    out = text[:i + len(POLICY_OPEN)] + nl + body(core) + nl + text[j:]
+
+    a = out.find(REMIND_OPEN)
+    if a >= 0:
+        b = out.find(REMIND_CLOSE, a + len(REMIND_OPEN))
+        if b > a:
+            out = out[:a + len(REMIND_OPEN)] + nl + body(overlay) + nl + out[b:]
+        else:
+            out = out[:a] + body(overlay) + nl + out[a:]
+    else:
+        k = out.find(POLICY_CLOSE)
+        k = (k + len(POLICY_CLOSE)) if k >= 0 else len(out)
+        out = out[:k] + nl + nl + body(overlay) + out[k:]
+
+    out = strip_echo_section(out).rstrip("\r\n ")
+    return out + nl + nl + body(echo) + nl
+
+
+def _json_str_span(raw, needle):
+    """含 needle 的那个 JSON 字符串值的 (start, end)，含两侧引号。"""
+    i = raw.find(needle)
+    if i < 0:
+        return None
+
+    def bare(pos):
+        n = 0
+        k = pos - 1
+        while k >= 0 and raw[k] == "\\":
+            n += 1
+            k -= 1
+        return n % 2 == 0
+
+    s = i
+    while s >= 0 and not (raw[s] == '"' and bare(s)):
+        s -= 1
+    if s < 0:
+        return None
+    e = i
+    n = len(raw)
+    while e < n and not (raw[e] == '"' and bare(e)):
+        e += 1
+    if e >= n:
+        return None
+    return (s, e + 1)
+
+
+def policy_patch_json(raw, core, overlay, echo):
+    """product.json 版：值是 JSON 字符串，换行是 \\n 转义。
+
+    只在那一个字符串值里动，文件其余字节原样保留 —— 重新 dump 整个对象会把
+    四十万字节的排版全洗一遍，回滚时看不出改了什么。
+    """
+    span = _json_str_span(raw, POLICY_OPEN)
+    if not span:
+        return None
+    try:
+        inner = json.loads(raw[span[0]:span[1]])
+    except ValueError:
+        return None
+    new_inner = policy_patch(inner, core, overlay, echo)
+    if new_inner is None:
+        return None
+    blob = json.dumps(new_inner, ensure_ascii=False)[1:-1]
+    return raw[:span[0] + 1] + blob + raw[span[1] - 1:]
+
+
+def policy_state(text, expected_hash):
+    """只看 content_policy 段内**本工具**的哈希。
+
+    current —— 段里的 pjm:h= 与本次一致
+    stale   —— 有 pjm:h= 但不一致（本工具上一版写的）
+    native  —— 段里没有 pjm:h=（出厂原文，或更早的工具写的，都该重写）
+    none    —— 根本没有 content_policy 段
+
+    这里刻意不认 unlock-v6 / unlock-v4：那种哈希说明这一段是别的工具写的，
+    正确动作是重写，而不是当成「自己的上一版」跳过去。
+    """
+    if not text:
+        return "none"
+    i = text.find(POLICY_OPEN)
+    if i < 0:
+        return "none"
+    j = text.find(POLICY_CLOSE, i + len(POLICY_OPEN))
+    inner = text[i:j if j > i else len(text)]
+    m = re.search(re.escape(HASH_PREFIX) + r"([0-9a-fA-F]{8,40})", inner)
+    if not m:
+        return "native"
+    if expected_hash and m.group(1) == expected_hash:
+        return "current"
+    return "stale"
 
 
 def detect_state(text, expected_hash):
@@ -4510,6 +4682,68 @@ def apply_one(ctx, tgt, root, path, kind, payload, force):
         return (False, False, "读不到内容，已跳过（不覆盖）：%s" % path)
     existed = os.path.exists(long_path(path))
 
+    if kind == "policy":
+        # 只清历史追加块。**不要**顺手 strip_orphan_echo：替换式注入的自证段本来
+        # 就在块外（文件末尾），把它当残留删掉会让每次 apply 都重写一遍。
+        base = strip_blocks(text)
+        migrated = base != text
+        state = policy_state(base, ctx.hash)
+        if state == "none":
+            # 没有 content_policy：不是提示词模板，把历史残留清掉就收工
+            if not migrated:
+                return (True, False, "没有 <content_policy> 段，跳过")
+            new = base
+        else:
+            if state == "current" and not migrated and not force:
+                return (True, False, "已是最新")
+            if state == "stale" and not migrated and not force:
+                return (True, False, "人格哈希来自上一版，跳过（--force 可重写）")
+            new = policy_patch(base, payload or policy_core(ctx.persona, tgt.key),
+                               OVERLAY, echo_section(tgt.key))
+            if new is None:
+                return (True, False, "<content_policy> 段不完整，跳过")
+        if new == text:
+            return (True, False, "已是最新")
+        if OPT["dry"]:
+            say("[预演] %s：会写 %s%s" % (tgt.name, path,
+                "（就地替换原生政策段，并清掉历史追加块）" if migrated else "（就地替换原生政策段）"))
+            return (True, True, "预演")
+        if not _prepare(path, tgt, root, existed):
+            return (False, False, "备份或建目录失败")
+        if not write_bytes_checked(path, encode_text(new, bom, eol)):
+            restore_backup(path, tgt.bak_suffix)
+            return (False, False, "写入失败或回读不一致，已回滚")
+        msg = "已写 %d 字符" % len(new)
+        if migrated:
+            msg += "，并清掉历史追加块"
+        return (True, True, msg)
+
+    if kind == "policyjson":
+        state = policy_state(text, ctx.hash)
+        if state == "none":
+            return (True, False, "没有 <content_policy> 段，跳过")
+        if state == "current" and not force:
+            return (True, False, "已是最新")
+        if state == "stale" and not force:
+            return (True, False, "哈希来自上一版，跳过（--force 可重写）")
+        if OPT["dry"]:
+            say("[预演] %s：会写 %s（%s）" % (tgt.name, path,
+                "替换原生政策段" if state == "native" else "升级政策段"))
+            return (True, True, "预演")
+        if not _prepare(path, tgt, root, existed):
+            return (False, False, "备份或建目录失败")
+        new = policy_patch_json(text, payload or policy_core(ctx.persona, tgt.key),
+                                OVERLAY, echo_section(tgt.key))
+        if new is None:
+            return (True, False, "<content_policy> 段不完整，跳过")
+        if not _json_ok(new):
+            restore_backup(path, tgt.bak_suffix)
+            return (False, False, "改完不是合法 JSON，已回滚")
+        if not write_bytes_checked(path, encode_text(new, bom, eol)):
+            restore_backup(path, tgt.bak_suffix)
+            return (False, False, "写入失败或回读不一致，已回滚")
+        return (True, True, "已写 %d 字符" % len(new))
+
     if kind == "block":
         # 块外的旧自证段先清掉；有这个残留时即使哈希一致也要重写一遍，
         # 否则老机器永远洗不掉上一代口令（状态判成「已是最新」直接跳过了）。
@@ -4683,6 +4917,14 @@ def _apply_memory(ctx, tgt, path, payload):
     text, bom, eol = read_or_default(path)
     if text is None:
         return (False, False, "读不到内容，已跳过（不覆盖）：%s" % path)
+    # 行尾按整份文件判：这类档案常是开头 LF、正文 CRLF，只看前 400 字符会判错，
+    # 写回去就把整份文件的换行洗成一种。
+    if text.count("\r\n") > text.count("\n") - text.count("\r\n"):
+        eol = "\r\n"
+    probe = mem_write(text, body, MEM_VERSION)
+    # 内容已经一样就别再写：只读锁要清一次再设回去，白折腾还可能撞上占用
+    if probe.replace("\r\n", "\n") == text.replace("\r\n", "\n") and not OPT["force"]:
+        return (True, False, "已是最新")
     if OPT["dry"]:
         say("[预演] %s：会写云记忆 %s（%d 字）" % (tgt.name, path, len(body)))
         return (True, True, "预演")
@@ -4694,7 +4936,11 @@ def _apply_memory(ctx, tgt, path, payload):
             restore_readonly(path)
         return (False, False, "建不了目录")
     ok = write_bytes_checked(path, encode_text(new, bom, eol))
-    if ro:
+    if ok:
+        # 写完锁成只读：客户端会把「过期」的档案回写成空记忆（tmp + rename），
+        # 覆盖只读文件会 EPERM，这条锁就是拦它的。原来不是只读也一并锁上。
+        restore_readonly(path)
+    elif ro:
         restore_readonly(path)
     if not ok:
         return (False, False, "云记忆写入失败")
@@ -4833,6 +5079,16 @@ def _is_prompt_template(path):
     if os.path.basename(path).lower() in PROMPT_TPL_NAMES:
         return True
     return bool(PROMPT_HINT.search(text[:20000]))
+
+
+def _policy_in(path):
+    """这个文件里有没有原生政策段。
+
+    有才值得注入 —— 像 system-reminder.tpl 那种几百字的上下文提醒，本来就没有
+    政策段，往里塞一份只会把它的语义冲掉，还白付 token。
+    """
+    text = read_strict(path)
+    return bool(text) and POLICY_OPEN in text
 
 
 class BlockTarget(Target):
@@ -5103,8 +5359,26 @@ class WorkBuddyTarget(BlockTarget):
                         out.append(p)
         return sorted(out)
 
+    def product_json(self, root):
+        """客户端真正读的那份提示词就在这儿 —— 模板只是出厂默认值。
+
+        模板只是出厂的默认值，真正被每轮读走的是这一份。只改模板等于
+        写完没人读：product.json 里留着的还是上一代的政策与旧口令。
+        """
+        for rel in (("resources", "app.asar.unpacked", "cli", "product.json"),
+                    ("resources", "app", "cli", "product.json")):
+            p = os.path.join(root, *rel)
+            if os.path.isfile(long_path(p)):
+                return p
+        return ""
+
     def plan(self, ctx, root):
-        out = [(p, "block", None) for p in self.templates(root)]
+        # 模板与 product.json 都走替换式：原生 <content_policy> 就地换正文。
+        # 往文末追加一块的老做法会让两份政策并存，每轮多付一遍 token，口径还打架。
+        out = [(p, "policy", None) for p in self.templates(root)]
+        pj = self.product_json(root)
+        if pj:
+            out.append((pj, "policyjson", None))
         data = getattr(self, "data_root", "")
         if data:
             for p in cloudmem_files(data):
@@ -5116,7 +5390,7 @@ class WorkBuddyTarget(BlockTarget):
                         if f.lower().endswith(".tpl"):
                             p = os.path.join(dirpath, f)
                             if _is_prompt_template(p):
-                                out.append((p, "block", None))
+                                out.append((p, "policy", None))
         return out
 
     def is_valid(self, root):
@@ -5266,23 +5540,23 @@ class WorkBuddyTarget(BlockTarget):
         if mem:
             mine = sum(1 for r in mem if r[3])
             tail = "；云记忆 %d 份，%d 份已注入" % (len(mem), mine)
-        tpls = self.templates(root)
-        if not tpls:
+        all_tpl = self.templates(root)
+        files = [p for p in all_tpl if _policy_in(p)]
+        pj = self.product_json(root)
+        if pj:
+            files.append(pj)
+        idle = len(all_tpl) - len([p for p in all_tpl if _policy_in(p)])
+        if not files:
             return "未安装", "没有可注入的模板" + tail
+        if idle:
+            tail += "；另有 %d 份无政策段的模板不注入" % idle
         tail += self._layer_tail(root)
-        cur = 0
-        injected = 0
-        for p in tpls:
-            text = read_strict(p)
-            if has_mark(text):
-                injected += 1
-                if detect_state(text, ctx.hash) == "current":
-                    cur += 1
-        if not injected:
-            return "严格态", "0/%d 份模板已注入%s" % (len(tpls), tail)
-        if cur == len(tpls):
-            return "宽松态·当前", "%d/%d 份%s" % (cur, len(tpls), tail)
-        return "宽松态·过期", "%d/%d 份为当前%s" % (cur, len(tpls), tail)
+        cur = sum(1 for p in files if policy_state(read_strict(p) or "", ctx.hash) == "current")
+        if not cur:
+            return "严格态", "0/%d 份已注入%s" % (len(files), tail)
+        if cur == len(files):
+            return "宽松态·当前", "%d/%d 份%s" % (cur, len(files), tail)
+        return "宽松态·过期", "%d/%d 份为当前%s" % (cur, len(files), tail)
 
     def _layer_tail(self, root):
         ask, guard, gate, web, n_tpl, n_js = self.layer_state(root)
