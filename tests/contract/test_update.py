@@ -178,8 +178,69 @@ def _newer(cand, cur):
     # 测试版之间按数字比
     ("1.01.9-beta", "1.01.8-beta", True),
     ("1.01.8-beta", "1.01.9-beta", False),
-    # 稳定版盖过同系列测试版，但不会反向降级
-    ("1.01-mod", "1.01.9-beta", False),
+    # 稳定版盖过同系列测试版：双向都算新。
+    # 这一条的数字是往下走的（1.01 < 1.01.9，1.02 < 1.02.1），纯数字比会判成
+    # 「更旧」—— 装测试版的人就被钉在测试通道上，永远升不到自己的稳定版。
+    ("1.01-mod", "1.01.9-beta", True),
+    ("1.02-mod", "1.02.1-beta", True),
+    # 反方向不降级：已经装了稳定版，不会被自己的上游测试版拉回去
+    ("1.01.9-beta", "1.01-mod", False),
+    ("1.02.1-beta", "1.02-mod", False),
+    # 跨系列照常：新线的测试版该推还是推
+    ("1.03.1-beta", "1.02-mod", True),
 ])
 def test_update_newer(cand, cur, want):
     assert _newer(cand, cur) is want
+
+
+# ---------------------------------------------------------------------------
+# 候选发布怎么挑
+#
+# 光有 update_newer 还不够：它拿到的 cand 是 update_check 挑出来的那一个。
+# 同一系列里稳定版与测试版并存时，1.02.1-beta 的数字比 1.02-mod 大，「取绝对
+# 最大」会永远挑中测试版本身 —— 装了测试版的人收到的 cand 就是自己，
+# newer 恒为 false，稳定版发了也看不到提示。
+# ---------------------------------------------------------------------------
+
+CHECK_SNIPPET = r'''
+import sys, os, json
+sys.path.insert(0, os.path.dirname(os.path.abspath(sys.argv[1])))
+import pojia
+pojia.DISPLAY_VERSION = sys.argv[3]
+pojia.update_channel = lambda: sys.argv[4]
+pojia.http_get = lambda url, timeout=8: sys.argv[2].encode("utf-8")
+ver, assets, err = pojia.update_check()
+print("GOT", ver, 1 if ver and pojia.update_newer(ver) else 0, err)
+'''
+
+
+def _pick(tags, cur, channel):
+    """-> (挑中的 tag, 它算不算该装的新版)。"""
+    import json
+    data = [{"tag_name": "v" + t, "draft": False,
+             "assets": [{"name": "a", "browser_download_url": "u"}]} for t in tags]
+    core = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "src", "pojia.py"))
+    p = subprocess.run([sys.executable, "-c", CHECK_SNIPPET, core,
+                        json.dumps(data), cur, channel],
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+    text = (p.stdout or b"").decode("utf-8", "replace").strip()
+    assert text.startswith("GOT "), (text, (p.stderr or b"").decode("utf-8", "replace"))
+    parts = text.split()
+    return parts[1], parts[2] == "1"
+
+
+@pytest.mark.parametrize("tags,cur,channel,want_tag,want_newer", [
+    # 测试版机器：同系列的稳定版虽然序号更小，也得被挑出来
+    (["1.02.1-beta", "1.02-mod"], "1.02.1-beta", "beta", "1.02-mod", True),
+    # 稳定版机器：同系列的上游测试版不当候选
+    (["1.02.1-beta", "1.02-mod"], "1.02-mod", "beta", "1.02.1-beta", False),
+    # 跨系列照旧推新线
+    (["1.02-mod", "1.03.1-beta"], "1.02-mod", "beta", "1.03.1-beta", True),
+    # 稳定通道里测试版压根不参与
+    (["1.02.1-beta", "1.01-mod"], "1.01-mod", "mod", "1.01-mod", False),
+])
+def test_update_check_picks_the_one_worth_installing(tags, cur, channel,
+                                                     want_tag, want_newer):
+    tag, newer = _pick(tags, cur, channel)
+    assert tag == want_tag, "挑中的是 %s，期望 %s（候选 %s）" % (tag, want_tag, tags)
+    assert newer is want_newer

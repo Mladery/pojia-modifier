@@ -159,13 +159,19 @@ def _newer(latest, cur):
     """跟核心 update_newer 同一条规则：稳定版盖过同系列的测试版。
 
     只在读不到核心那行 `#update`（老版本输出）时才走到这儿。稳定版 1.01-mod
-    数字上小于它的上游 1.01.9-beta，纯数字比会让人被劝「升级」回自己的测试版。
+    数字上小于它的上游 1.01.9-beta，纯数字比会让人被劝「升级」回自己的测试版；
+    反过来 1.02.1-beta 的数字又大于 1.02-mod，测试版用户会收不到同系列稳定版。
+    所以同一系列里稳定版恒为新，两个方向都成立。
     """
-    if not _dotted(latest) > _dotted(cur):
-        return False
-    if _channel_of(cur) == "mod" and _channel_of(latest) in ("alpha", "beta"):
-        if _dotted(latest)[:2] == _dotted(cur)[:2]:
+    latest_v = _dotted(latest)
+    cur_v = _dotted(cur)
+    if latest_v[:2] == cur_v[:2]:
+        if _channel_of(cur) == "mod" and _channel_of(latest) in ("alpha", "beta"):
             return False
+        if _channel_of(latest) == "mod" and _channel_of(cur) in ("alpha", "beta"):
+            return True
+    if not latest_v > cur_v:
+        return False
     return True
 
 

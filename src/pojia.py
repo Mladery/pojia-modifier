@@ -43,8 +43,8 @@ import zlib
 # 0. 常量与运行时开关
 # ---------------------------------------------------------------------------
 
-VERSION = "1.02.1"              # 护照里只存这个，纯数字
-DISPLAY_VERSION = "1.02.1-beta"  # 界面上给人看的：跟 Release tag 一致
+VERSION = "1.02"              # 护照里只存这个，纯数字
+DISPLAY_VERSION = "1.02-mod"  # 界面上给人看的：跟 Release tag 一致
 APP = "POJIA"                   # 护照里的 tool 字段，磁盘契约，别改
 DISPLAY_NAME = "破甲修改器"      # 只用于对外文案
 
@@ -3758,6 +3758,80 @@ def strip_blocks(text):
     return text
 
 
+# 块外的旧自证小节：更早的分支（社区版 8.65 / pojia-ce）往同一批模板里写过一份
+# 「自证」说明，但它不带本工具的标记，strip_blocks 删不到。本工具的块里自带一份
+# 新的，两份并存时模型可能挑到旧的那条 —— 于是「破甲自检」回的还是上一代口令。
+# 注入前先把它清掉，块内那份不动。
+ECHO_HEAD_HINTS = ("自证", "口令", "安装回执")
+ECHO_BODY_HINTS = ("破甲自检", "破甲已生效", "社区版", "pojia-ce")
+
+
+def _block_line_mask(lines, text):
+    """每行是否落在本工具的块内（主块或镜像块）。"""
+    spans = find_blocks(text) + find_blocks(text, MIRROR_BEGIN, MIRROR_END)
+    if not spans:
+        return [False] * len(lines)
+    offs = []
+    pos = 0
+    for ln in lines:
+        offs.append(pos)
+        pos += len(ln) + 1
+    return [any(s <= off < e for s, e in spans) for off in offs]
+
+
+def strip_orphan_echo(text):
+    """删掉块外的自证口令小节。块内的自证段不受影响。
+
+    识别方式按「小节」而不是按行：以含「自证 / 口令 / 安装回执」的标题行为起点，
+    往下扫到下一个标题行、下一个本工具块标记或文件尾为止；这一段里只要出现
+    本工具的口气（破甲自检 / 破甲已生效 / 社区版 / pojia-ce）就整段删掉。
+    没有标题的裸口令行单独兜底删一行，免得留下悬空的说明句。
+    """
+    if not text:
+        return text
+    lines = text.split("\n")
+    mask = _block_line_mask(lines, text)
+    drop = [False] * len(lines)
+
+    def is_head(i):
+        s = lines[i].lstrip()
+        return s.startswith("#") and any(h in s for h in ECHO_HEAD_HINTS)
+
+    def has_body(a, b):
+        return any(any(h in lines[i] for h in ECHO_BODY_HINTS)
+                   for i in range(a, b) if not mask[i])
+
+    for i in range(len(lines)):
+        if mask[i] or drop[i] or not is_head(i):
+            continue
+        j = i + 1
+        # 小节一般只有几行，扫太远说明这是正文标题，不是自证小节
+        limit = min(len(lines), i + 25)
+        while j < limit:
+            s = lines[j].strip()
+            if s.startswith("<!-- POJIA-") or s.startswith("#"):
+                break
+            j += 1
+        if not has_body(i + 1, j):
+            continue
+        for k in range(i, j):
+            drop[k] = True
+        while j < len(lines) and not lines[j].strip():
+            drop[j] = True
+            j += 1
+
+    # 兜底：没有标题的裸口令行（旧版直接甩一行在文件里）
+    for i, ln in enumerate(lines):
+        if mask[i] or drop[i] or "|" not in ln:
+            continue
+        if any(h in ln for h in ECHO_BODY_HINTS):
+            drop[i] = True
+
+    if not any(drop):
+        return text
+    return "\n".join(ln for i, ln in enumerate(lines) if not drop[i])
+
+
 def put_blocks(text, main_block, mirror_block):
     """主块与镜像块一起落盘：没有就追加，有就整体替换（两者之间一个空行）。"""
     composite = "%s\n\n%s\n" % (main_block, mirror_block)
@@ -4401,22 +4475,32 @@ def apply_one(ctx, tgt, root, path, kind, payload, force):
     existed = os.path.exists(long_path(path))
 
     if kind == "block":
+        # 块外的旧自证段先清掉；有这个残留时即使哈希一致也要重写一遍，
+        # 否则老机器永远洗不掉上一代口令（状态判成「已是最新」直接跳过了）。
+        cleaned = strip_orphan_echo(text)
+        orphan = cleaned != text
         state = detect_state(text, ctx.hash)
-        if state == "current" and not force:
+        if state == "current" and not force and not orphan:
             return (True, False, "已是最新")
-        if state == "stale" and not force:
+        if state == "stale" and not force and not orphan:
             return (True, False, "人格哈希来自上一版，跳过（--force 可重写）")
         if OPT["dry"]:
-            say("[预演] %s：会写 %s" % (tgt.name, path))
+            if orphan:
+                say("[预演] %s：会写 %s（并清掉块外的旧自证段）" % (tgt.name, path))
+            else:
+                say("[预演] %s：会写 %s" % (tgt.name, path))
             return (True, True, "预演")
         if not _prepare(path, tgt, root, existed):
             return (False, False, "备份或建目录失败")
-        new = put_blocks(text, payload or build_block(ctx, tgt.key),
+        new = put_blocks(cleaned, payload or build_block(ctx, tgt.key),
                          build_mirror(ctx, tgt.key))
         if not write_bytes_checked(path, encode_text(new, bom, eol)):
             restore_backup(path, tgt.bak_suffix)
             return (False, False, "写入失败或回读不一致，已回滚")
-        return (True, True, "已写 %d 字符" % len(new))
+        msg = "已写 %d 字符" % len(new)
+        if orphan:
+            msg += "，并清掉块外的旧自证段"
+        return (True, True, msg)
 
     if kind == "whole":
         body = (payload or assemble(ctx.persona, tgt.key)).replace("\r\n", "\n").strip("\n") + "\n"
@@ -6523,15 +6607,26 @@ def update_newer(cand, cur=None):
     测试版 —— 界面顶上就冒出「有新版本 v1.01.9-beta 可以装（当前 v1.01-mod）」，
     而那个包其实是它自己的上游。
 
-    所以同一系列（major.minor 相同）里，装的是 -mod 就不再被 -alpha / -beta
-    打动；跨系列（1.01-mod 对 1.02.x）照旧按数字比，新线该推还是推。
+    所以同一系列（major.minor 相同）里，稳定版与测试版谁新不由数字决定：
+
+    - 装的是 -mod -> 不被同系列的 -alpha / -beta 打动（1.01-mod 挡住 1.01.9-beta）；
+    - 装的是测试版 -> 同系列的 -mod 一律算新（1.02.1-beta 升到 1.02-mod）。
+
+    两个方向都得挡：后一个方向数字是往下走的（1.02 < 1.02.1），只按数字比，
+    测试版用户永远收不到同系列的稳定版，等于被钉在测试通道上。
+
+    跨系列（1.01-mod 对 1.02.x）照旧按数字比，新线该推还是推。
     """
     cur = cur or DISPLAY_VERSION
+    cur_ch = version_channel(cur)
+    cand_ch = version_channel(cand)
+    if version_tuple(cand)[:2] == version_tuple(cur)[:2]:
+        if cur_ch == "mod" and cand_ch in ("alpha", "beta"):
+            return False
+        if cand_ch == "mod" and cur_ch in ("alpha", "beta"):
+            return True
     if not version_tuple(cand) > version_tuple(cur):
         return False
-    if version_channel(cur) == "mod" and version_channel(cand) in ("alpha", "beta"):
-        if version_tuple(cand)[:2] == version_tuple(cur)[:2]:
-            return False
     return True
 
 
@@ -6636,8 +6731,15 @@ def update_check(timeout=8):
 
     # 注意这里不能用 _rank()：那个吃的是版本串（靠 -beta 后缀判），
     # 通道名本身就是 "beta"，没有连字符，会被当成稳定版。
+    #
+    # 选「该装的」而不是「序号最大的」：同一系列里稳定版与测试版并存时，
+    # 1.02.1-beta 的数字比 1.02-mod 大，只看绝对最大会永远选中测试版本身 ——
+    # 装了测试版的人就永远收不到自己的稳定版（update_check 返回的 tag 是它自己，
+    # update_newer 自然给 false）。没有可装的再退回最大那个，只为让
+    # 「最新发布」那一行有个可显示的值。
     mine = _CHANNEL_RANK.get(update_channel(), 2)
     best = None
+    top = None
     for item in data:
         if not isinstance(item, dict) or item.get("draft"):
             continue
@@ -6647,8 +6749,14 @@ def update_check(timeout=8):
         if _rank(tag) < mine:            # 比我这个渠道还激进，不推
             continue
         key = (version_tuple(tag), _rank(tag))
+        if top is None or key > top[0]:
+            top = (key, tag, item)
+        if not update_newer(tag):
+            continue
         if best is None or key > best[0]:
             best = (key, tag, item)
+    if best is None:
+        best = top
     if best is None:
         return "", {}, ""
     _key, tag, item = best
