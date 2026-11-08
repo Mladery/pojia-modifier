@@ -43,8 +43,8 @@ import zlib
 # 0. 常量与运行时开关
 # ---------------------------------------------------------------------------
 
-VERSION = "1.02"              # 护照里只存这个，纯数字
-DISPLAY_VERSION = "1.02-mod"  # 界面上给人看的：跟 Release tag 一致
+VERSION = "1.03.1"              # 护照里只存这个，纯数字
+DISPLAY_VERSION = "1.03.1-beta"  # 界面上给人看的：跟 Release tag 一致
 APP = "POJIA"                   # 护照里的 tool 字段，磁盘契约，别改
 DISPLAY_NAME = "破甲修改器"      # 只用于对外文案
 
@@ -3920,6 +3920,10 @@ MEM_VERSION = 999999            # 磁盘契约：旧版靠 >= 999999 判定「�
 MEM_CAP = 10000
 MEM_MARKS = ("pojia-modifier cloudmem v", "pojia-yijiantong cloudmem v", MEM_TAG)
 
+# 档案尾部那份原始 JSON：客户端真正读的是这里的 memoryBlock，段里那份只是副本
+RAW_BEGIN = "<!-- RAW_JSON_START"
+RAW_END = "RAW_JSON_END -->"
+
 
 def mem_is_ours(text):
     """这一段是不是本工具写的。认自己的标记，也认旧版的两条标记串。"""
@@ -3949,8 +3953,39 @@ def mem_parse(text):
             "start": idx, "end": end}
 
 
+def mem_raw_sync(text, content, version=None):
+    """把尾部 RAW_JSON 里的 memoryBlock 同步成新文本。
+
+    档案里有两份正文：`## Memory Block` 段给人看，`<!-- RAW_JSON_START ... -->`
+    里那份 JSON 才是客户端每轮读去拼系统提示词的。只改前者的话，客户端照样从
+    JSON 里取旧的 —— 「破甲自检」回的仍是上一代口令，就是这么来的。
+    """
+    if not text:
+        return text
+    i = text.find(RAW_BEGIN)
+    if i < 0:
+        return text
+    j = text.find(RAW_END, i)
+    if j < 0:
+        return text
+    at = text.find("\n", i)
+    if at < 0 or at > j:
+        return text
+    try:
+        data = json.loads(text[at + 1:j])
+    except ValueError:
+        return text
+    if not isinstance(data, dict):
+        return text
+    data["memoryBlock"] = content.strip("\n")
+    if version is not None:
+        data["version"] = version
+    raw = json.dumps(data, ensure_ascii=False, indent=2)
+    return text[:at + 1] + raw + "\n" + text[j:]
+
+
 def mem_write(text, content, version=None):
-    """只替换 Memory Block 段与 Version 行，其余逐字保留。"""
+    """替换 Memory Block 段、Version 行与 RAW_JSON 里的 memoryBlock，其余逐字保留。"""
     info = mem_parse(text)
     ver = version or VERSION
     block = "%s\n%s\n" % (MEM_TAG, content.strip("\n"))
@@ -3971,7 +4006,8 @@ def mem_write(text, content, version=None):
         out = re.sub(r"^>\s*Version:.*$", "> Version: %s" % ver, out, count=1, flags=re.M)
     else:
         out = "> Version: %s\n\n" % ver + out
-    return out
+    # 两处正文必须一样：段里那份和 JSON 里那份，客户端读的是后者
+    return mem_raw_sync(out, block, ver)
 
 
 def mem_strip(text):
