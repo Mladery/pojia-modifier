@@ -43,8 +43,8 @@ import zlib
 # 0. 常量与运行时开关
 # ---------------------------------------------------------------------------
 
-VERSION = "1.01.7"              # 护照里只存这个，纯数字
-DISPLAY_VERSION = "1.01.7-beta"  # 界面上给人看的：跟 Release tag 一致
+VERSION = "1.01.8"              # 护照里只存这个，纯数字
+DISPLAY_VERSION = "1.01.8-beta"  # 界面上给人看的：跟 Release tag 一致
 APP = "POJIA"                   # 护照里的 tool 字段，磁盘契约，别改
 DISPLAY_NAME = "破甲修改器"      # 只用于对外文案
 
@@ -6684,6 +6684,13 @@ def update_download(assets, dst):
         return False, "校验不符（发布方 %s…，本地 %s…）" % (want[:12], got[:12])
     tmp = dst + ".part"
     try:
+        # 落盘前自己把目录建好。全新装的目录里没有 state/ —— 那是程序跑过 apply
+        # 之后才写出来的东西，而升级是第一件可能要写它的事。1.01.6 及以前这里直接
+        # open，于是「刚装好就点升级」必然走到
+        #   No such file or directory: ...\state\_update_xxx.exe.part
+        parent = os.path.dirname(tmp)
+        if parent:
+            os.makedirs(long_path(parent), exist_ok=True)
         with open(long_path(tmp), "wb") as fh:
             fh.write(blob)
         if not IS_WIN:
