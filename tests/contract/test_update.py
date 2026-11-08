@@ -138,3 +138,48 @@ def test_swap_batch_wait_loop_terminates(box, tmp_path):
     used = time.time() - t0
     assert "SWAP-REACHED" in (r.stdout or ""), (r.stdout, r.stderr)
     assert used < 20, "过了 %.1fs 才走到 swap，说明又在扫盘" % used
+
+
+# ---------------------------------------------------------------------------
+# 「谁算新版」
+#
+# 1.01-mod 是从 1.01.9-beta 切出来的：内容一样，序号反而小。纯数字比会让
+# 稳定版用户被劝「升级」回自己那份测试版 —— 界面顶上就冒出
+# 「有新版本 v1.01.9-beta 可以装（当前 v1.01-mod）」。
+# ---------------------------------------------------------------------------
+
+NEWER_SNIPPET = r'''
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.abspath(sys.argv[1])))
+import pojia
+for item in sys.argv[2:]:
+    cand, cur = item.split("|")
+    print("%s|%s|%d" % (cand, cur, 1 if pojia.update_newer(cand, cur) else 0))
+'''
+
+
+def _newer(cand, cur):
+    core = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "src", "pojia.py"))
+    p = subprocess.run([sys.executable, "-c", NEWER_SNIPPET, core, cand + "|" + cur],
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+    text = (p.stdout or b"").decode("utf-8", "replace").strip()
+    assert text.endswith("|0") or text.endswith("|1"), (text, p.stderr)
+    return text.endswith("|1")
+
+
+@pytest.mark.parametrize("cand,cur,want", [
+    # 稳定版不被自己的上游打动
+    ("1.01.9-beta", "1.01-mod", False),
+    ("1.01.10-beta", "1.01-mod", False),   # 同系列一律不推：稳定版已经是这条线的终点
+    ("1.01-mod", "1.01-mod", False),
+    # 跨系列照常推
+    ("1.02.1-beta", "1.01-mod", True),
+    ("1.02-mod", "1.01-mod", True),
+    # 测试版之间按数字比
+    ("1.01.9-beta", "1.01.8-beta", True),
+    ("1.01.8-beta", "1.01.9-beta", False),
+    # 稳定版盖过同系列测试版，但不会反向降级
+    ("1.01-mod", "1.01.9-beta", False),
+])
+def test_update_newer(cand, cur, want):
+    assert _newer(cand, cur) is want

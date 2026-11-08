@@ -155,6 +155,20 @@ def _channel_of(text):
     return m.group(1) if m else "mod"
 
 
+def _newer(latest, cur):
+    """跟核心 update_newer 同一条规则：稳定版盖过同系列的测试版。
+
+    只在读不到核心那行 `#update`（老版本输出）时才走到这儿。稳定版 1.01-mod
+    数字上小于它的上游 1.01.9-beta，纯数字比会让人被劝「升级」回自己的测试版。
+    """
+    if not _dotted(latest) > _dotted(cur):
+        return False
+    if _channel_of(cur) == "mod" and _channel_of(latest) in ("alpha", "beta"):
+        if _dotted(latest)[:2] == _dotted(cur)[:2]:
+            return False
+    return True
+
+
 def _core_args(extra):
     return ([sys.executable] if FROZEN else [sys.executable, "-u", CORE]) + list(extra)
 
@@ -215,7 +229,7 @@ def check_update(timeout=15):
         return {"ok": False, "note": "没读到版本号"}
     latest, cur = m.group(1), core_version()
     return {"ok": True, "latest": latest, "current": cur,
-            "newer": _dotted(latest) > _dotted(cur),
+            "newer": _newer(latest, cur),
             "channel": _channel_of(cur), "channel_name": "", "note": ""}
 
 

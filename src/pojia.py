@@ -43,8 +43,8 @@ import zlib
 # 0. 常量与运行时开关
 # ---------------------------------------------------------------------------
 
-VERSION = "1.01"              # 护照里只存这个，纯数字
-DISPLAY_VERSION = "1.01-mod"  # 界面上给人看的：跟 Release tag 一致
+VERSION = "1.02.1"              # 护照里只存这个，纯数字
+DISPLAY_VERSION = "1.02.1-beta"  # 界面上给人看的：跟 Release tag 一致
 APP = "POJIA"                   # 护照里的 tool 字段，磁盘契约，别改
 DISPLAY_NAME = "破甲修改器"      # 只用于对外文案
 
@@ -6515,6 +6515,26 @@ def _rank(text):
     return _CHANNEL_RANK.get(version_channel(text), 2)
 
 
+def update_newer(cand, cur=None):
+    """cand 是不是「该装」的新版：稳定版盖过同系列的测试版。
+
+    1.01-mod 是从 1.01.9-beta 切出来的稳定版：内容一样，序号反而更小
+    （1.01 < 1.01.9）。只按数字比，装了稳定版的人会被劝「升级」回自己那份
+    测试版 —— 界面顶上就冒出「有新版本 v1.01.9-beta 可以装（当前 v1.01-mod）」，
+    而那个包其实是它自己的上游。
+
+    所以同一系列（major.minor 相同）里，装的是 -mod 就不再被 -alpha / -beta
+    打动；跨系列（1.01-mod 对 1.02.x）照旧按数字比，新线该推还是推。
+    """
+    cur = cur or DISPLAY_VERSION
+    if not version_tuple(cand) > version_tuple(cur):
+        return False
+    if version_channel(cur) == "mod" and version_channel(cand) in ("alpha", "beta"):
+        if version_tuple(cand)[:2] == version_tuple(cur)[:2]:
+            return False
+    return True
+
+
 def channel_label(ch):
     """beta -> 测试通道。"""
     return "%s通道" % _CHANNEL_NAME.get(ch, "稳定")
@@ -6810,7 +6830,7 @@ def run_update(check_only=False):
         say("  %s还没有发布。" % channel_label(ch))
         emit_update_line("", ch)
         return 0
-    newer = version_tuple(ver) > version_tuple(VERSION)
+    newer = update_newer(ver)
     say("  当前：%s　收：%s" % (DISPLAY_VERSION, channel_label(ch)))
     say("  最新发布：%s（%s）" % (ver, channel_label(version_channel(ver))))
     emit_update_line(ver, ch)
@@ -6850,7 +6870,7 @@ def emit_update_line(ver, ch):
     payload = {
         "latest": ver or "",
         "current": DISPLAY_VERSION,
-        "newer": bool(ver) and version_tuple(ver) > version_tuple(VERSION),
+        "newer": bool(ver) and update_newer(ver),
         "channel": ch,
         "channel_name": _CHANNEL_NAME.get(ch, "稳定"),
     }
