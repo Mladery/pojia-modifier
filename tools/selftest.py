@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """逐目标往返自检（不属于交付物，只用来证明行为等价）。
 
-对 17 个目标各造一个假安装，跑：
+对 20 个目标各造一个假安装，跑：
     注入 -> 再注入（必须字节不变）-> 撤回（必须字节回到原样）
 
 只比字节，不看内部结构。
@@ -141,6 +141,9 @@ def seed(root):
         ("windsurf", os.path.join("memories", "global_rules.md")),
         ("cline", "pojia-inject.md"), ("copilot", "copilot-instructions.md"),
         ("kiro", os.path.join("steering", "pojia-inject.md")),
+        ("reasonix", "AGENTS.md"),
+        ("traecn", os.path.join("rules", "project_rules.md")),
+        ("qodercn", os.path.join("agents", "purge", "qodercn.md")),
     ]
     for key, rel in simple:
         d = os.path.join(root, key)

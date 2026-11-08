@@ -1,6 +1,6 @@
 # 破甲修改器
 
-> 产物名 `pojia-modifier`，对外版本号 **`v1.03.1-beta`**，MIT 正文 + Commons Clause。
+> 产物名 `pojia-modifier`，对外版本号 **`v1.03.2-beta`**，MIT 正文 + Commons Clause。
 > 后缀即渠道：`-alpha` 开发版、`-beta` 测试版、`-mod` 稳定版。
 > 仅限在**自己有权管理的本机设备**上使用，下载前请读 [完整免责声明](docs/disclaimer.md)。
 
@@ -9,12 +9,12 @@
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20Commons%20Clause-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
 
-**一句话：把你电脑上 17 个 AI 客户端「自己改不到的内置提示词」，换成你自己写的那份。**
+**一句话：把你电脑上 20 个 AI 客户端「自己改不到的内置提示词」，换成你自己写的那份。**
 
 | 换完之后 | 说明 |
 |---|---|
 | 用**你的**身份设定 | 而不是软件自带的默认人格 |
-| **17 个客户端一份口径** | 共用一份人格文本，不用各改各的 |
+| **20 个客户端一份口径** | 共用一份人格文本，不用各改各的 |
 | **当场能自证** | 发一句固定口令验证真载入，不靠「感觉好像生效了」 |
 | **随时能还原** | `--revert` 回官方原版，改前备份一直都在 |
 
@@ -58,6 +58,9 @@
 | `cline` | Cline（`~/Documents/Cline/Rules/pojia-inject.md`） |
 | `copilot` | GitHub Copilot CLI（`~/.copilot/copilot-instructions.md`） |
 | `kiro` | Kiro（`~/.kiro/steering/pojia-inject.md`） |
+| `reasonix` | Reasonix Studio（`%APPDATA%\reasonix/AGENTS.md`，非 `~/.reasonix`） |
+| `traecn` | Trae CN（`~/.trae-cn/rules/project_rules.md`，与 `trae` 分开认） |
+| `qodercn` | Qoder CN（`~/.qoder-cn/agents/purge/qodercn.md` 带 frontmatter，附 `skills/purge/SKILL.md`） |
 
 ## 快速开始
 
@@ -198,7 +201,7 @@ src/pojia.py                   命令行主程序（零第三方依赖）
 src/pojia_gui.py               图形界面：本机网页 UI，零依赖
 policy_src/                    策略明文：policy / overlay / hardening / echo / addenda
 tools/embed_policy.py          明文 → 嵌入常量（重跑必须字节一致）
-tools/selftest.py              17 个目标的自检
+tools/selftest.py              20 个目标的自检
 tools/                         打包与发布：PyInstaller、NSIS、POSIX 安装器、签名与验签
 vendor/everything/             Everything SDK 动态库（MIT），用于直查文件索引
 tests/contract/                26 条黑盒契约

@@ -64,7 +64,7 @@
 
 ## 3. 目标清单
 
-以下为必须支持的 17 个目标。路径中的 `~` 表示用户主目录。
+以下为必须支持的 20 个目标。路径中的 `~` 表示用户主目录。
 
 > **路径的唯一权威是 `20-locate` 第 2 节的固定路径表。** 本节只列"形态"与"注意事项"，
 > 目录名与文件名的细节不在这里重复——两处都写必然漂移。
@@ -88,6 +88,9 @@
 | `cline` | Cline | `~/Documents/Cline/Rules` | `pojia-inject.md` | 标记块 |
 | `copilot` | Copilot CLI | `~/.copilot` | `copilot-instructions.md` | 标记块 |
 | `kiro` | Kiro | `~/.kiro` | `steering/pojia-inject.md` | 标记块 |
+| `reasonix` | Reasonix | `%APPDATA%/reasonix` | `AGENTS.md` | 标记块 |
+| `traecn` | Trae CN | `~/.trae-cn` | `rules/project_rules.md` | 标记块 |
+| `qodercn` | Qoder CN | `~/.qoder-cn` | `agents/purge/qodercn.md` | 标记块（frontmatter 在块之前） |
 
 ### 3.1 各目标的定位要点
 
@@ -103,6 +106,9 @@
 | `windsurf` | `WINDSURF_HOME` / `CODEIUM_HOME` | `Windsurf` | 全局规则有 6000 字符上限，超了只提示不回滚 |
 | `cline` | `CLINE_CONFIG_DIR` | 无 | 纯文件型，无进程可查 |
 | `kiro` | `KIRO_HOME` | `Kiro` | 底层模型是 Claude，专用段要按 Claude 口径写 |
+| `reasonix` | `REASONIX_HOME` / `REASONIX_STATE_HOME` | `Reasonix Studio.exe` / `reasonix` / `reasonix-studio-host.exe` | 主目录在 `%APPDATA%\reasonix`，`~\.reasonix` 只是锁目录；分层加载 `AGENTS.md` → 祖先链 → 项目 → `*.local.md` |
+| `traecn` | `TRAE_CN_HOME` | `Trae CN.exe` | 与 `trae` 分开认：`rules/` 与 `user_rules/` 两个目录都整目录加载，`alwaysApply` 是装载标记不是优先级 |
+| `qodercn` | `QODER_CONFIG_DIR` / `QODER_HOME` | `Qoder.exe` | 本地没有可替换的政策块（政策在服务端），靠 agent + skill 两层行为契约；`skills/purge/SKILL.md` 是主文件之外的附带落点，撤回时一并摘除 |
 
 ---
 
@@ -229,7 +235,7 @@ ZCode 的系统提示词嵌在 `zcode.cjs` 里，是一个 JS 字符串常量。
 
 ## 8. 验收要点
 
-- 17 个目标逐个跑"注入 → 再注入 → 撤回"，字节级一致。
+- 20 个目标逐个跑"注入 → 再注入 → 撤回"，字节级一致。
 - 目标目录不存在时，注入能自建，撤回能删干净（不留空目录）。
 - DSH 解包后，注入点文件存在且被正确改写；还原后解包目录被清除。
 - WorkBuddy 多模板中有一份失败时，其余仍成功，退出码为 1。
