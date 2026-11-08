@@ -6684,19 +6684,32 @@ def update_install(new_path):
         return False, "源码运行时只提示不替换，新版留着：%s" % new_path
     if IS_WIN and install_meta():
         exe = os.path.basename(me)
+        # cmd 里统一用反斜杠：路径万一是拼出来的（状态目录带正斜杠），
+        # start 会把正斜杠当成开关。
+        setup_exe = str(new_path).replace("/", "\\")
         bat = _swap_script([
             "@echo off",
-            "ping -n 4 127.0.0.1 >nul",
+            # 先给主进程一点时间自己退，退不掉就杀掉 —— 升级这条路上不能等它
+            # 自己愿意。等到第 15 次（约 15 秒）还没走，直接 taskkill。
+            "ping -n 3 127.0.0.1 >nul",
+            "set /a n=0",
             ":wait",
             'tasklist /fi "imagename eq %s" 2>nul | find /i "%s" >nul' % (exe, exe),
-            "if not errorlevel 1 (ping -n 2 127.0.0.1 >nul & goto wait)",
-            'start /wait "" "%s" /S' % new_path,
+            "if errorlevel 1 goto swap",
+            "set /a n+=1",
+            'if %%n%% GEQ 15 taskkill /f /im "%s" >nul 2>&1' % exe,
+            "ping -n 2 127.0.0.1 >nul",
+            "goto wait",
+            ":swap",
+            # /POJIA_SELFDEL：告诉安装程序「装完把自己删掉」。只有这条路由我们
+            # 拉起来，别的 /S 不该被顺手删掉人家的文件。
+            'start /wait "" "%s" /S /POJIA_SELFDEL' % setup_exe,
             'start "" "%s"' % me,
             'del "%~f0"',
         ], "_pojia_update.bat")
         if not bat or not _run_detached(["cmd", "/c", bat]):
             return False, "安排静默安装失败，请手动运行 %s" % new_path
-        return True, "已安排静默安装，本进程退出后自动升级并重启"
+        return True, "已安排升级：程序会自己退出，装完自动打开"
     if IS_WIN:
         bat = _swap_script([
             "@echo off",
@@ -6740,6 +6753,15 @@ def run_update(check_only=False):
         say("  有新版本。升级：--update")
         return 0
     dst = os.path.join(STATE_DIR, "_update_" + update_asset())
+    # 老版本不会删自己下过的 setup.exe，攒几个版本就是一堆几十兆的同名文件。
+    # 顺手清掉，只留这次要用的那一个。
+    try:
+        keep = os.path.basename(dst)
+        for name in os.listdir(STATE_DIR):
+            if name.startswith("_update_") and name != keep:
+                remove_file(os.path.join(STATE_DIR, name))
+    except OSError:
+        pass
     ok, msg = update_download(assets, dst)
     if not ok:
         remove_file(dst)

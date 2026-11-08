@@ -250,6 +250,10 @@ async function run(action){
     stateTimer = setTimeout(() => { if (!busy) setState("idle"); }, bad ? 12000 : 5000);
     document.querySelectorAll(".act").forEach(b => b.disabled = false);
     sync();
+    /* 升级已经安排好了：服务端马上自己退出，这个页面随即断线。
+       与其让人对着一个加载不出来的页面发呆，不如盖一层说清楚 ——
+       顺便试一下关掉自己（有的浏览器不让关不是脚本打开的标签，关不掉就算了）。 */
+    if (action === "update" && plain.indexOf("已安排升级") >= 0) showUpgrading();
   }
 }
 
@@ -378,7 +382,7 @@ async function probeUpdate(){
     const d = await res.json();
     if (!d.ok || !d.newer) return;
     uText.innerHTML = `有新版本 <b class="mono">v${esc(d.latest)}</b> 可以装`
-      + `（当前 v${esc(d.current)}）。装完关掉这个窗口就行，程序会自己换好再打开。`;
+      + `（当前 v${esc(d.current)}）。点一下就开始：程序会自己退出，换好文件再打开。`;
     uGo.textContent = `安装 v${d.latest}`;
     uBar.hidden = false;
   }catch(e){ /* 没网、限流、被墙都当没这回事 */ }
@@ -392,6 +396,26 @@ uNo.onclick = () => {
   uBar.hidden = true;
   try{ localStorage.setItem("pojia.skipUpdate", VERSION); }catch(e){}
 };
+
+/* 升级中那一层：服务端安排好换装就自己退了，页面随即断线。
+   盖一层说明比让人对着加载不出来的页面强；顺手试一下自关。 */
+function showUpgrading(){
+  if (document.getElementById("upgrading")) return;
+  const d = document.createElement("div");
+  d.id = "upgrading";
+  d.setAttribute("style", [
+    "position:fixed", "inset:0", "z-index:9999", "display:flex",
+    "flex-direction:column", "align-items:center", "justify-content:center",
+    "gap:8px", "text-align:center", "padding:24px",
+    "background:var(--paper)", "color:var(--ink)",
+    "font:15px/1.8 system-ui,-apple-system,'Segoe UI',sans-serif"
+  ].join(";"));
+  d.innerHTML = '<div style="font-size:20px;font-weight:700">正在升级…</div>'
+    + '<div style="color:var(--ink-2)">程序会自己退出，换好文件再打开。'
+    + '<br>这个页面可以关掉了。</div>';
+  document.body.appendChild(d);
+  try{ setTimeout(() => window.close(), 300); }catch(e){}
+}
 
 /* 先问设置：关掉「启动时检查更新」就一次网络请求都不发。
    拿到之后再决定要不要查 —— 顺序反了就等于没关。 */

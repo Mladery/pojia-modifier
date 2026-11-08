@@ -438,6 +438,7 @@ class Handler(BaseHTTPRequestHandler):
         except OSError as e:
             self.wfile.write(("启动失败：%s\n" % e).encode("utf-8"))
             return
+        tail = []
         try:
             while True:
                 chunk = proc.stdout.readline()
@@ -445,6 +446,8 @@ class Handler(BaseHTTPRequestHandler):
                     break
                 self.wfile.write(chunk)
                 self.wfile.flush()
+                tail.append(chunk.decode("utf-8", "replace"))
+                del tail[:-20]
         except (BrokenPipeError, ConnectionResetError):
             proc.kill()
         finally:
@@ -453,6 +456,18 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             proc.wait()
+
+        # 升级安排好了：这个进程得自己退场，否则批处理永远等不到文件解锁，
+        # 用户的印象就是「点了没反应」。批处理那边还有 taskkill 兜底，
+        # 这里先体面地走 —— 页面上的最后一行说明它会自己重开。
+        if action == "update" and proc.returncode == 0 and "已安排升级" in "".join(tail):
+            try:
+                self.wfile.write(
+                    "\n程序即将退出，安装完成后会自动重新打开。\n".encode("utf-8"))
+                self.wfile.flush()
+            except Exception:
+                pass
+            threading.Timer(1.5, os._exit, (0,)).start()
 
 
 def main():

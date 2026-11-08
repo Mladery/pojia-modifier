@@ -373,11 +373,20 @@ Function DeleteSetup
 FunctionEnd
 
 Function .onInstSuccess
-  ; 非静默的装完由完成页那个复选框决定删不删；静默的没人可问，直接清掉
-  ; —— 那个 setup.exe 是 --update 自己下到临时目录里的，留着只是垃圾。
-  IfSilent del_ok
+  ; 非静默的装完由完成页那个复选框决定删不删。
+  ;
+  ; 静默安装不替人删自己：/S 谁都会敲 —— 批量部署、CI、脚本里都可能来一发，
+  ; 把人家脚本里的 setup.exe 吃掉是越界。只有程序自己的 --update 拉起来的那次
+  ; 才带 /POJIA_SELFDEL，才删。
+  IfSilent try_selfdel
   Return
-  del_ok:
+
+  try_selfdel:
+  ${GetParameters} $1
+  ${StrStr} $0 "$1" "/POJIA_SELFDEL"
+  ${If} $0 == ""
+    Return
+  ${EndIf}
   Call DeleteSetup
 FunctionEnd
 
