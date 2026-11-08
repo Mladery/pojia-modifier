@@ -182,6 +182,34 @@
   }
   .hint b{font-weight:560; color:var(--ink-2)}
 
+  /* ── 结论条 ──────────────────────────────────────────────
+     运行输出搬到了「运行记录」页，主界面就剩这一条说成没成。
+     绿=跑通、朱红=没跑通（跟别处的语义保持一致），点右边去看细节。 */
+  .result{
+    display:flex; align-items:center; gap:10px;
+    margin:14px 0 0; padding:11px 14px;
+    border:1px solid var(--line); border-radius:var(--r);
+    background:var(--surface); font-size:13.5px;
+  }
+  .result[hidden]{display:none}
+  .result .r-ico{
+    width:8px; height:8px; border-radius:999px; flex:none;
+    background:var(--ink-3);
+  }
+  .result .r-body{min-width:0}
+  .result b{font-weight:640; margin-right:8px}
+  .result .r-body span{color:var(--ink-2)}
+  .result.ok{border-color:var(--ok); background:var(--ok-soft)}
+  .result.ok .r-ico{background:var(--ok)}
+  .result.ok b{color:var(--ok)}
+  /* 跑完了但有需要处理的地方：靛青，不红 —— 那是「看完了有发现」，不是「炸了」 */
+  .result.warn{border-color:var(--accent); background:var(--accent-soft)}
+  .result.warn .r-ico{background:var(--accent)}
+  .result.warn b{color:var(--accent)}
+  .result.bad{border-color:var(--danger); background:var(--danger-soft)}
+  .result.bad .r-ico{background:var(--danger)}
+  .result.bad b{color:var(--danger)}
+
   /* ── 按钮 ───────────────────────────────────────────── */
   .btn{
     padding:8px 15px; border-radius:var(--r-sm); cursor:pointer;

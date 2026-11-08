@@ -77,6 +77,14 @@
       <button type="button" class="btn" id="detect">先检测一下（只看不改）</button>
     </div>
     <p class="hint" id="hint"></p>
+
+    <!-- 跑完回到这一页，第一眼先看到成没成；细节去运行记录翻 -->
+    <div class="result" id="result" hidden>
+      <span class="r-ico" aria-hidden="true"></span>
+      <div class="r-body"><b id="r-title"></b><span id="r-text"></span></div>
+      <span class="grow"></span>
+      <button type="button" class="link" id="r-log">看运行记录</button>
+    </div>
   </section>
 
   <details class="help">

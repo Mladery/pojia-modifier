@@ -143,6 +143,9 @@ _UPDATE_LINE = re.compile(
     r"最新发布：\s*([0-9][0-9.]*(?:-(?:alpha|beta|mod))?)")
 _UPDATE_JSON = "#update "
 _SETTINGS_JSON = "#settings "
+# 一条流结束前补上的退出码。前端只认这个前缀，用它判断成败，不显示。
+# 为什么另发而不是看最后一行：只读动作（体检）本来就会打 [!] 提示，按字样判会误报。
+EXIT_SENTINEL = "__POJIA_EXIT__:"
 # 通道从后缀读：1.01.3-beta -> beta，没有后缀就是稳定版
 _CH_RANK = {"alpha": 0, "beta": 1, "mod": 2}
 
@@ -455,12 +458,21 @@ class Handler(BaseHTTPRequestHandler):
                 proc.stdout.close()
             except Exception:
                 pass
-            proc.wait()
+        code = proc.wait()
+
+        # 最后补一行退出码（前端认得这个前缀，只在内部用、不显示）。
+        # 成败以它为准：体检这类只读动作本来就会打 [!] 提示，
+        # 按字样判会把「看完了，有两处要注意」当成失败。
+        try:
+            self.wfile.write(("\n%s%d\n" % (EXIT_SENTINEL, code)).encode("utf-8"))
+            self.wfile.flush()
+        except Exception:
+            pass
 
         # 升级安排好了：这个进程得自己退场，否则批处理永远等不到文件解锁，
         # 用户的印象就是「点了没反应」。批处理那边还有 taskkill 兜底，
         # 这里先体面地走 —— 页面上的最后一行说明它会自己重开。
-        if action == "update" and proc.returncode == 0 and "已安排升级" in "".join(tail):
+        if action == "update" and code == 0 and "已安排升级" in "".join(tail):
             try:
                 self.wfile.write(
                     "\n程序即将退出，安装完成后会自动重新打开。\n".encode("utf-8"))

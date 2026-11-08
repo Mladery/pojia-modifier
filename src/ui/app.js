@@ -13,6 +13,7 @@ const stateEl = $("state"), stateText = $("state-text"), countEl = $("count");
 const elapsedEl = $("elapsed"), consoleEl = $("console"), optsEl = $("opts");
 const goBtn = $("go"), hintEl = $("hint");
 const uBar = $("u-bar"), uText = $("u-text"), uGo = $("u-go"), uNo = $("u-no");
+const resultEl = $("result"), rTitle = $("r-title"), rText = $("r-text"), rLog = $("r-log");
 
 /* 软件清单 */
 TARGETS.forEach(([key, label]) => {
@@ -188,12 +189,57 @@ function setState(kind){
 }
 /* 输出里出现这些字样就当成「没跑通」，胶囊转红，省得小白翻几百行找 */
 const BAD = /(\[!\]|\[x\]|Traceback|失败|出错|错误：|Error:|not found|拒绝访问)/i;
+const SENTINEL = "__POJIA_EXIT__:";
+
+/* 动作的中文名：结论条上写「一键破甲完成」，不写 apply 完成 */
+function actionName(key){
+  const hit = ACTIONS.filter(a => a[0] === key)[0];
+  return hit ? hit[1] : key;
+}
+
+/* 主界面上那一句话：成没成、用时多少、为什么不成就去看运行记录。
+   详细输出在「运行记录」页 —— 这里只负责让人不用翻日志就知道结果。 */
+/* 退出码的语义（跟 CLI 一致）：0 跑通、1 有没办成/需要处理的、2 根本没跑起来。
+   只读动作的 1 不是失败 —— 体检本来就会「查出 5 项需要处理」，那是它干完活了，
+   写成一抹朱红的「失败」只会把人吓一跳。 */
+const READ_ACTIONS = {status: 1, diagnose: 1, check: 1, dryrun: 1, snapshot: 1, compare: 1};
+
+function showResult(action, code, plain, secs){
+  const name = actionName(action);
+  const clean = plain.replace(/\x1b\[[0-9;]*m/g, "");
+  const hit = clean.split("\n").filter(l => BAD.test(l) && l.trim())[0] || "";
+  let state;
+  if (code === 2) state = "bad";
+  else if (code === 1) state = READ_ACTIONS[action] ? "warn" : "bad";
+  else if (code === null) state = BAD.test(plain) ? "bad" : "ok";
+  else state = "ok";
+
+  if (state === "bad"){
+    rTitle.textContent = "失败";
+    rText.textContent = `${name}没有跑通`
+      + (hit ? `：${hit.trim().replace(/^[\[!x\]]+\s*/i, "").slice(0, 70)}` : "")
+      + `。报错请看运行记录。`;
+  } else if (state === "warn"){
+    rTitle.textContent = "完成";
+    rText.textContent = `${name}跑完了，有需要处理的地方。细节在运行记录里。`;
+  } else {
+    rTitle.textContent = "成功";
+    rText.textContent = `${name}完成，用时 ${secs.toFixed(1)}s。每一步都记在运行记录里。`;
+  }
+  resultEl.classList.toggle("bad", state === "bad");
+  resultEl.classList.toggle("warn", state === "warn");
+  resultEl.classList.toggle("ok", state === "ok");
+  resultEl.hidden = false;
+}
+
+rLog.onclick = () => showPage("log", true);
 
 let started = false;
 async function run(action){
   if (busy) return;
   busy = true;
   setState("busy");
+  resultEl.hidden = true;        /* 上一轮的结论先收起来，别跟这一轮混 */
   consoleEl.classList.add("on");
   showPage("log");               /* 点了就跑，输出在记录页 —— 顺手切过去 */
   goBtn.disabled = true;
@@ -204,6 +250,14 @@ async function run(action){
     elapsedEl.textContent = ((Date.now() - t0) / 1000).toFixed(1) + "s";
   }, 100);
   let plain = "";
+  let code = null;               /* 服务端在最后补一行退出码：成败看它，不靠猜字样 */
+  const take = p => {
+    if (p.indexOf(SENTINEL) === 0){
+      code = parseInt(p.slice(SENTINEL.length), 10);
+      return true;
+    }
+    return false;
+  };
   try{
     const res = await fetch(`/api/run?t=${TOKEN}`, {
       method: "POST",
@@ -227,12 +281,13 @@ async function run(action){
         const parts = buf.split("\n");
         buf = parts.pop();
         for (const p of parts){
+          if (take(p)) continue;
           plain += p + "\n";
           outEl.insertAdjacentHTML("beforeend", ansiToHtml(p) + "\n");
         }
         outEl.scrollTop = outEl.scrollHeight;
       }
-      if (buf){
+      if (buf && !take(buf)){
         plain += buf;
         outEl.insertAdjacentHTML("beforeend", ansiToHtml(buf) + "\n");
       }
@@ -245,15 +300,24 @@ async function run(action){
     busy = false;
     consoleEl.classList.remove("on");
     outEl.scrollTop = outEl.scrollHeight;
-    const bad = BAD.test(plain);
-    setState(bad ? "bad" : "good");
-    stateTimer = setTimeout(() => { if (!busy) setState("idle"); }, bad ? 12000 : 5000);
+    /* 有退出码就以退出码为准：只读动作打出 [!] 提示是正常的，
+       按字样判会把「体检完了，有两处要注意」当成失败。 */
+    const failed = code === null ? BAD.test(plain) : (code === 2 || (code === 1 && !READ_ACTIONS[action]));
+    setState(failed ? "bad" : "good");
+    stateTimer = setTimeout(() => { if (!busy) setState("idle"); }, failed ? 12000 : 5000);
     document.querySelectorAll(".act").forEach(b => b.disabled = false);
     sync();
     /* 升级已经安排好了：服务端马上自己退出，这个页面随即断线。
        与其让人对着一个加载不出来的页面发呆，不如盖一层说清楚 ——
        顺便试一下关掉自己（有的浏览器不让关不是脚本打开的标签，关不掉就算了）。 */
-    if (action === "update" && plain.indexOf("已安排升级") >= 0) showUpgrading();
+    if (action === "update" && plain.indexOf("已安排升级") >= 0){
+      showUpgrading();
+    } else {
+      /* 输出在「运行记录」页，跑完得把人送回来，并且在这一页写清成没成。
+         不送回来，用户看到的就永远是最后那一页日志，主界面上什么都没有。 */
+      showResult(action, code, plain, (Date.now() - t0) / 1000);
+      showPage("main");
+    }
   }
 }
 
