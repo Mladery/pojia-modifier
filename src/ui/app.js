@@ -14,6 +14,8 @@ const elapsedEl = $("elapsed"), consoleEl = $("console"), optsEl = $("opts");
 const goBtn = $("go"), hintEl = $("hint");
 const uBar = $("u-bar"), uText = $("u-text"), uGo = $("u-go"), uNo = $("u-no");
 const resultEl = $("result"), rTitle = $("r-title"), rText = $("r-text"), rLog = $("r-log");
+const uCheck = $("u-check"), uState = $("u-state"), uInstall = $("u-install");
+const uProg = $("u-prog"), uFill = $("u-fill"), uPct = $("u-pct"), uLog = $("u-log");
 
 /* 软件清单 */
 TARGETS.forEach(([key, label]) => {
@@ -237,11 +239,19 @@ rLog.onclick = () => showPage("log", true);
 let started = false;
 async function run(action){
   if (busy) return;
+  const upd = action === "update";
   busy = true;
   setState("busy");
   resultEl.hidden = true;        /* 上一轮的结论先收起来，别跟这一轮混 */
-  consoleEl.classList.add("on");
-  showPage("log");               /* 点了就跑，输出在记录页 —— 顺手切过去 */
+  if (upd){
+    /* 升级的输出和进度留在「设置」页：那儿有通道、有检查按钮，
+       点完不该把人拽到另一个页面去读日志。 */
+    startUpdateUI();
+    showPage("settings");
+  } else {
+    consoleEl.classList.add("on");
+    showPage("log");             /* 点了就跑，输出在记录页 —— 顺手切过去 */
+  }
   goBtn.disabled = true;
   document.querySelectorAll(".act").forEach(b => b.disabled = true);
   if (!started){ outEl.innerHTML = ""; started = true; }
@@ -257,6 +267,17 @@ async function run(action){
       return true;
     }
     return false;
+  };
+  /* 一行一处分流：进度行喂进度条，别的行进日志（升级进设置页那块小窗）。 */
+  const emitLine = p => {
+    if (p.indexOf("#progress ") === 0){
+      const a = p.split(" ");
+      setProgress(parseInt(a[1], 10), a[2], a[3]);
+      return;
+    }
+    plain += p + "\n";
+    if (upd) appendUpd(p);
+    else outEl.insertAdjacentHTML("beforeend", ansiToHtml(p) + "\n");
   };
   try{
     const res = await fetch(`/api/run?t=${TOKEN}`, {
@@ -282,19 +303,14 @@ async function run(action){
         buf = parts.pop();
         for (const p of parts){
           if (take(p)) continue;
-          plain += p + "\n";
-          outEl.insertAdjacentHTML("beforeend", ansiToHtml(p) + "\n");
+          emitLine(p);
         }
         outEl.scrollTop = outEl.scrollHeight;
       }
-      if (buf && !take(buf)){
-        plain += buf;
-        outEl.insertAdjacentHTML("beforeend", ansiToHtml(buf) + "\n");
-      }
+      if (buf && !take(buf)) emitLine(buf);
     }
   }catch(e){
-    plain += String(e);
-    outEl.insertAdjacentHTML("beforeend", `<span style="color:#e08a7c">${esc(String(e))}</span>\n`);
+    emitLine(String(e));
   }finally{
     clearInterval(timer);
     busy = false;
@@ -310,8 +326,20 @@ async function run(action){
     /* 升级已经安排好了：服务端马上自己退出，这个页面随即断线。
        与其让人对着一个加载不出来的页面发呆，不如盖一层说清楚 ——
        顺便试一下关掉自己（有的浏览器不让关不是脚本打开的标签，关不掉就算了）。 */
-    if (action === "update" && plain.indexOf("已安排") >= 0){
-      showUpgrading();
+    if (upd){
+      if (failed){
+        /* 没装成得能再来一次：刚才 hide 掉的安装按钮放回来，
+           不然只剩「再点一遍检查更新」这一条路，白查一次。 */
+        updState("升级没有完成，看上面的输出", "bad");
+        uInstall.hidden = !updTarget;
+        uCheck.disabled = false;
+      } else if (plain.indexOf("已安排") >= 0){
+        showUpgrading();
+      } else {
+        /* 没安排换装又没报错（比如只是提示一下），留在设置页把话说清楚 */
+        updState("没有可装的更新", "ok");
+        uCheck.disabled = false;
+      }
     } else {
       /* 输出在「运行记录」页，跑完得把人送回来，并且在这一页写清成没成。
          不送回来，用户看到的就永远是最后那一页日志，主界面上什么都没有。 */
@@ -460,6 +488,68 @@ uNo.onclick = () => {
   uBar.hidden = true;
   try{ localStorage.setItem("pojia.skipUpdate", VERSION); }catch(e){}
 };
+
+/* ── 设置页的「检查更新」 ────────────────────────────────────
+   以前只有顶上那条提示，查不查要等它自己弹。现在这儿有个手动按钮：
+   查到了就地装，进度也在这一页看，不用再跑回顶上点。 */
+
+let updTarget = "";            /* 查到的版本；装失败后靠它把按钮放回来 */
+
+function updState(text, kind){
+  uState.textContent = text;
+  uState.className = "updmsg" + (kind ? " " + kind : "");
+}
+
+function setProgress(pct, got, total){
+  const v = Math.max(0, Math.min(100, pct || 0));
+  uFill.style.width = v + "%";
+  uPct.textContent = (+total > 0)
+    ? `${v}% · ${(+got).toFixed(1)}/${(+total).toFixed(1)} MB`
+    : `${v}%`;
+}
+
+function startUpdateUI(){
+  uProg.hidden = false;
+  uLog.hidden = false;
+  uLog.textContent = "";
+  setProgress(0, 0, 0);
+  updState("正在准备…");
+  uInstall.hidden = true;
+  uCheck.disabled = true;
+}
+
+function appendUpd(line){
+  uLog.textContent += line.replace(/\x1b\[[0-9;]*m/g, "").replace(/^\s+/, "") + "\n";
+  uLog.scrollTop = uLog.scrollHeight;
+}
+
+uCheck.onclick = async () => {
+  uCheck.disabled = true;
+  uInstall.hidden = true;
+  updState("检查中…");
+  try{
+    const r = await fetch(`/api/update?t=${TOKEN}`);
+    const d = await r.json();
+    if (!d || !d.ok){
+      updTarget = "";
+      updState("没查成：" + ((d && d.note) || "网络不通"), "bad");
+    } else if (d.newer){
+      updTarget = d.latest;
+      updState(`有新版本 v${d.latest}（当前 v${d.current}）`, "ok");
+      uInstall.textContent = `安装 v${d.latest}`;
+      uInstall.hidden = false;
+    } else {
+      updTarget = "";
+      updState(`已是最新（v${d.current}）`, "ok");
+    }
+  }catch(e){
+    updState("没查成：连不上", "bad");
+  }finally{
+    uCheck.disabled = false;
+  }
+};
+
+uInstall.onclick = () => run("update");
 
 /* 升级中那一层：服务端安排好换装就自己退了，页面随即断线。
    盖一层说明比让人对着加载不出来的页面强；顺手试一下自关。 */

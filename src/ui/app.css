@@ -210,6 +210,28 @@
   .result.bad .r-ico{background:var(--danger)}
   .result.bad b{color:var(--danger)}
 
+  /* ── 设置页的更新卡 ────────────────────────────────────── */
+  .updline{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+  .updmsg{font-size:13px; color:var(--ink-2)}
+  .updmsg.ok{color:var(--ok)}
+  .updmsg.bad{color:var(--danger)}
+  .prog{display:flex; align-items:center; gap:10px; margin-top:12px}
+  .pbar{
+    flex:1; height:8px; border-radius:999px; overflow:hidden;
+    background:var(--surface-2); border:1px solid var(--line);
+  }
+  .pbar i{
+    display:block; height:100%; width:0; background:var(--accent);
+    transition:width .18s ease;
+  }
+  .pct{font-size:12px; color:var(--ink-3); white-space:nowrap; text-align:right}
+  .updlog{
+    margin:10px 0 0; max-height:120px; overflow:auto;
+    font-size:12px; line-height:1.65; color:var(--ink-2);
+    background:var(--surface-2); border:1px solid var(--line);
+    border-radius:var(--r-sm); padding:8px 10px; white-space:pre-wrap;
+  }
+
   /* ── 按钮 ───────────────────────────────────────────── */
   .btn{
     padding:8px 15px; border-radius:var(--r-sm); cursor:pointer;

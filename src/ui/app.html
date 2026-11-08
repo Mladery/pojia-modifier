@@ -218,6 +218,27 @@
         <a class="repo" href="__REPO__" target="_blank" rel="noopener noreferrer">更新日志</a>
       </div>
     </div>
+
+    <!-- 检查和安装放一块：查到了就地装，不用再跑回顶上去点那条提示 -->
+    <div class="card" id="upd-card">
+      <div class="head">
+        <h2>检查更新</h2>
+        <span class="aside">点一下就知道有没有新版</span>
+      </div>
+      <div class="pane">
+        <div class="updline">
+          <button type="button" class="btn" id="u-check">检查更新</button>
+          <span class="updmsg" id="u-state">还没查过</span>
+          <span class="grow"></span>
+          <button type="button" class="btn primary" id="u-install" hidden>安装</button>
+        </div>
+        <div class="prog" id="u-prog" hidden>
+          <div class="pbar"><i id="u-fill"></i></div>
+          <span class="pct mono" id="u-pct">0%</span>
+        </div>
+        <pre class="updlog" id="u-log" hidden></pre>
+      </div>
+    </div>
   </div>
 
   <footer>

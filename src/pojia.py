@@ -43,8 +43,8 @@ import zlib
 # 0. 常量与运行时开关
 # ---------------------------------------------------------------------------
 
-VERSION = "1.01.6"              # 护照里只存这个，纯数字
-DISPLAY_VERSION = "1.01.6-beta"  # 界面上给人看的：跟 Release tag 一致
+VERSION = "1.01.7"              # 护照里只存这个，纯数字
+DISPLAY_VERSION = "1.01.7-beta"  # 界面上给人看的：跟 Release tag 一致
 APP = "POJIA"                   # 护照里的 tool 字段，磁盘契约，别改
 DISPLAY_NAME = "破甲修改器"      # 只用于对外文案
 
@@ -6551,13 +6551,30 @@ def update_channel():
     return load_settings()["channel"]
 
 
-def http_get(url, timeout=8):
-    """取一段字节。失败抛 OSError / ValueError，由调用方决定怎么报。"""
+def http_get(url, timeout=8, progress=None):
+    """取一段字节。失败抛 OSError / ValueError，由调用方决定怎么报。
+
+    progress(got, total)：边下边报，界面上的进度条靠它。total 拿不到就是 0
+    （有些 CDN 不给 Content-Length），调用方自己决定怎么显示。
+    """
     import urllib.request
     req = urllib.request.Request(url, headers={
         "User-Agent": "%s/%s" % (VAULT_APP, VERSION), "Accept": "*/*"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read()
+        if progress is None:
+            return resp.read()
+        try:
+            total = int(resp.headers.get("Content-Length") or 0)
+        except (TypeError, ValueError):
+            total = 0
+        buf = bytearray()
+        while True:
+            chunk = resp.read(64 * 1024)
+            if not chunk:
+                break
+            buf += chunk
+            progress(len(buf), total)
+        return bytes(buf)
 
 
 def update_asset():
@@ -6621,6 +6638,23 @@ def update_check(timeout=8):
     return tag, assets, ""
 
 
+def _gui_progress():
+    """界面在跑时才吐进度行：CLI 那边读到 `#progress` 只会莫名其妙。
+
+    格式固定成 `#progress <百分比> <已下 MB> <总 MB>` —— 界面按空格切，
+    --check-update 那种给人看的输出不受影响。
+    """
+    if not os.environ.get("POJIA_GUI"):
+        return None
+
+    def report(got, total):
+        pct = int(got * 100.0 / total) if total else 0
+        print("#progress %d %.1f %.1f"
+              % (pct, got / 1048576.0, total / 1048576.0), flush=True)
+
+    return report
+
+
 def update_download(assets, dst):
     """下载 + 校验。-> (ok, 说明)。校验和表里有这个文件就必须对得上。"""
     name = update_asset()
@@ -6628,7 +6662,7 @@ def update_download(assets, dst):
     if not url:
         return False, "这次发布里没有 %s" % name
     try:
-        blob = http_get(url, timeout=180)
+        blob = http_get(url, timeout=180, progress=_gui_progress())
     except (OSError, ValueError) as exc:
         return False, "下载失败：%s" % exc
     want = ""

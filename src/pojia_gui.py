@@ -431,6 +431,9 @@ class Handler(BaseHTTPRequestHandler):
         env = dict(os.environ)
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUNBUFFERED"] = "1"
+        # 告诉核心「这次是界面在跑」：下载时才吐 #progress 行给进度条用，
+        # CLI 那边不吐，免得命令行里冒出一串机器格式。
+        env["POJIA_GUI"] = "1"
         cwd = HERE if FROZEN else (os.path.dirname(HERE) or HERE)
         try:
             proc = subprocess.Popen(
