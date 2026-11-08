@@ -43,8 +43,8 @@ import zlib
 # 0. 常量与运行时开关
 # ---------------------------------------------------------------------------
 
-VERSION = "1.01.2"              # 护照里只存这个，纯数字
-DISPLAY_VERSION = "1.01.2-beta"  # 界面上给人看的：跟 Release tag 一致
+VERSION = "1.01.3"              # 护照里只存这个，纯数字
+DISPLAY_VERSION = "1.01.3-beta"  # 界面上给人看的：跟 Release tag 一致
 APP = "POJIA"                   # 护照里的 tool 字段，磁盘契约，别改
 DISPLAY_NAME = "破甲修改器"      # 只用于对外文案
 
@@ -6466,13 +6466,89 @@ def do_clean_spill(targets):
 UPDATE_REPO = "https://github.com/Mladery/pojia-modifier"
 UPDATE_API = os.environ.get("POJIA_UPDATE_API") or \
     "https://api.github.com/repos/Mladery/pojia-modifier/releases/latest"
+
+
+def _list_url(base):
+    """把单个发布的地址换成列表地址。测试里给的是现成列表，就别再拼参数。"""
+    base = str(base or "")
+    if "/latest" in base:
+        return base.replace("/latest", "") + "?per_page=30"
+    return base
+
+
+# 光看 /releases/latest 是不够的：它把预发布整段跳过，装 beta 的人永远等不到
+# 下一个 beta。改成拉最近一页发布列表，渠道筛选放在本地做。
+UPDATE_LIST = _list_url(UPDATE_API)
 UPDATE_CACHE = "_update.json"
 UPDATE_TTL = 86400
+SETTINGS_FILE = "_settings.json"
+
+# 后缀即渠道：alpha < beta < mod（没有后缀当稳定版）。
+# 收谁不收谁只看一条：候选的等级 **不低于** 自己 ——
+#   alpha 收 alpha + beta + mod，beta 收 beta + mod，mod 只收 mod。
+_CHANNEL_RANK = {"alpha": 0, "beta": 1, "mod": 2}
+_CHANNEL_NAME = {"alpha": "前期测试", "beta": "测试", "mod": "稳定"}
 
 
 def version_tuple(text):
-    hit = re.search(r"(\d+)\.(\d+)", str(text or ""))
-    return (int(hit.group(1)), int(hit.group(2))) if hit else (0, 0)
+    """1.01.2-beta -> (1,1,2)；1.0-mod -> (1,0,0)。
+
+    以前只抓两段，`1.01.2` 被截成 `(1,1)` 跟 `1.0` 的 `(1,0)` 比还看不出来，
+    一旦出现「第三段变了」的版本就判成一样，更新提示永远不弹。
+    """
+    hit = re.search(r"\d+(?:\.\d+)*", str(text or ""))
+    if not hit:
+        return (0, 0, 0)
+    parts = [int(p) for p in hit.group(0).split(".")][:3]
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts)
+
+
+def version_channel(text):
+    """从版本串里取渠道。1.01.2-beta -> beta；1.0-mod / 1.0 -> mod。"""
+    m = re.search(r"-(alpha|beta|mod)\b", str(text or "").lower())
+    return m.group(1) if m else "mod"
+
+
+def _rank(text):
+    return _CHANNEL_RANK.get(version_channel(text), 2)
+
+
+def channel_label(ch):
+    """beta -> 测试通道。"""
+    return "%s通道" % _CHANNEL_NAME.get(ch, "稳定")
+
+
+# ---- 更新通道：存在状态目录里，界面和命令行读同一份
+
+def default_channel():
+    """没设过就看当前这版的后缀 —— 装 beta 的人默认继续收 beta。"""
+    return version_channel(DISPLAY_VERSION)
+
+
+def load_settings():
+    data = load_json(state_path(SETTINGS_FILE), {})
+    ch = str(data.get("channel") or "").lower()
+    if ch not in _CHANNEL_RANK:
+        ch = default_channel()
+    auto = data.get("auto_check")
+    return {"channel": ch, "auto_check": True if auto is None else bool(auto)}
+
+
+def save_settings(channel=None, auto_check=None):
+    data = load_settings()
+    if channel:
+        data["channel"] = channel
+    if auto_check is not None:
+        data["auto_check"] = bool(auto_check)
+    save_json(state_path(SETTINGS_FILE), data)
+    return data
+
+
+def update_channel():
+    """这台机器愿意收哪个渠道。"""
+    return load_settings()["channel"]
 
 
 def http_get(url, timeout=8):
@@ -6500,17 +6576,49 @@ def update_asset():
     return "pojia-modifier-linux-x64" + ("-installer.run" if installed else "")
 
 
+def _release_tag(item):
+    """tag 去掉前缀 v，后缀留着 —— 渠道信息就在后缀里。"""
+    return str(item.get("tag_name") or "").strip().lstrip("vV")
+
+
 def update_check(timeout=8):
-    """-> (远端版本, {资产名: 下载地址}, 错误)。"""
+    """-> (远端版本, {资产名: 下载地址}, 错误)。
+
+    拉最近 30 个发布，只留「渠道等级不低于自己」的那些，再取版本最大的一个。
+    同版本号时稳的优先：两个 1.01.2 摆在面前，先拿正式版。
+    """
     try:
-        data = json.loads(http_get(UPDATE_API, timeout).decode("utf-8", "replace"))
+        raw = http_get(UPDATE_LIST, timeout).decode("utf-8", "replace")
+        data = json.loads(raw)
     except (OSError, ValueError) as exc:
         return "", {}, str(exc)
-    ver = str(data.get("tag_name") or "").lstrip("vV").split("-")[0]
+    if isinstance(data, dict):           # 命中旧接口 / 报错体，别当列表用
+        return "", {}, str(data.get("message") or "发布列表读不出来")
+    if not isinstance(data, list):
+        return "", {}, "发布列表读不出来"
+
+    # 注意这里不能用 _rank()：那个吃的是版本串（靠 -beta 后缀判），
+    # 通道名本身就是 "beta"，没有连字符，会被当成稳定版。
+    mine = _CHANNEL_RANK.get(update_channel(), 2)
+    best = None
+    for item in data:
+        if not isinstance(item, dict) or item.get("draft"):
+            continue
+        tag = _release_tag(item)
+        if not tag or not version_tuple(tag) > (0, 0, 0):
+            continue
+        if _rank(tag) < mine:            # 比我这个渠道还激进，不推
+            continue
+        key = (version_tuple(tag), _rank(tag))
+        if best is None or key > best[0]:
+            best = (key, tag, item)
+    if best is None:
+        return "", {}, ""
+    _key, tag, item = best
     assets = {}
-    for item in data.get("assets") or []:
-        assets[str(item.get("name"))] = str(item.get("browser_download_url") or "")
-    return ver, assets, ""
+    for a in item.get("assets") or []:
+        assets[str(a.get("name"))] = str(a.get("browser_download_url") or "")
+    return tag, assets, ""
 
 
 def update_download(assets, dst):
@@ -6611,15 +6719,21 @@ def update_install(new_path):
 
 
 def run_update(check_only=False):
+    ch = update_channel()
     ver, assets, err = update_check()
     if err:
         fail_msg("检查更新失败：%s" % err)
         return 1
     if not ver:
-        fail_msg("这次发布没读到版本号")
-        return 1
-    say("  最新发布：%s　当前：%s" % (ver, DISPLAY_VERSION))
-    if version_tuple(ver) <= version_tuple(VERSION):
+        say("  当前：%s　收：%s" % (DISPLAY_VERSION, channel_label(ch)))
+        say("  %s还没有发布。" % channel_label(ch))
+        emit_update_line("", ch)
+        return 0
+    newer = version_tuple(ver) > version_tuple(VERSION)
+    say("  当前：%s　收：%s" % (DISPLAY_VERSION, channel_label(ch)))
+    say("  最新发布：%s（%s）" % (ver, channel_label(version_channel(ver))))
+    emit_update_line(ver, ch)
+    if not newer:
         say("  已是最新。")
         return 0
     if check_only:
@@ -6637,9 +6751,77 @@ def run_update(check_only=False):
     return 0 if ok else 1
 
 
+def emit_update_line(ver, ch):
+    """给界面读的一行：--check-update 的最后一行，前缀固定，不带颜色。
+
+    界面另有一条正则兜底，但这条不会随文案改而失效 —— 人看的字随便调，
+    机器读的这行保持不动。
+    """
+    payload = {
+        "latest": ver or "",
+        "current": DISPLAY_VERSION,
+        "newer": bool(ver) and version_tuple(ver) > version_tuple(VERSION),
+        "channel": ch,
+        "channel_name": _CHANNEL_NAME.get(ch, "稳定"),
+    }
+    try:
+        _emit("#update " + json.dumps(payload, ensure_ascii=False))
+    except Exception:
+        pass
+
+
+def do_settings(spec=""):
+    """看 / 改设置。写成 `channel=beta auto=off` 就顺手存下来。"""
+    data = load_settings()
+    patch_ch = None
+    patch_auto = None
+    err = ""
+    for piece in re.split(r"[,，\s]+", spec or ""):
+        if not piece:
+            continue
+        if "=" not in piece:
+            err = "看不懂「%s」，要写成 channel=beta 这种" % piece
+            break
+        key, val = [x.strip().lower() for x in piece.split("=", 1)]
+        if key in ("channel", "通道"):
+            if val not in _CHANNEL_RANK:
+                err = "通道只有 alpha / beta / mod"
+                break
+            patch_ch = val
+        elif key in ("auto", "auto-check", "auto_check"):
+            if val in ("on", "1", "true", "yes", "开"):
+                patch_auto = True
+            elif val in ("off", "0", "false", "no", "关"):
+                patch_auto = False
+            else:
+                err = "auto 只有 on / off"
+                break
+        else:
+            err = "不认识的设置项：%s" % key
+            break
+    if err:
+        fail_msg(err)
+        return 2
+    if patch_ch or patch_auto is not None:
+        data = save_settings(channel=patch_ch, auto_check=patch_auto)
+        say("  已保存：收%s，启动检查%s"
+            % (channel_label(data["channel"]), "开" if data["auto_check"] else "关"))
+    payload = {
+        "version": DISPLAY_VERSION,
+        "channel": data["channel"],
+        "auto_check": data["auto_check"],
+        "channels": [{"id": k, "name": _CHANNEL_NAME[k] + "通道"}
+                     for k in ("alpha", "beta", "mod")],
+    }
+    _emit("#settings " + json.dumps(payload, ensure_ascii=False))
+    return 0
+
+
 def update_hint():
     """启动时最多每 24 小时查一次。**只提示，不装。**"""
     if os.environ.get("POJIA_NO_UPDATE_CHECK"):
+        return
+    if not load_settings()["auto_check"]:
         return
     path = state_path(UPDATE_CACHE)
     ver = ""
@@ -6656,8 +6838,9 @@ def update_hint():
         ver = got
         save_json(path, {"t": time.time(), "ver": ver})
     if ver and version_tuple(ver) > version_tuple(VERSION):
-        say("  提示：有新版 %s（当前 %s）。升级用 --update；不想被提示就加 --no-update-check"
-            % (ver, DISPLAY_VERSION))
+        say("  提示：有新版 %s（当前 %s，收%s）。升级用 --update；"
+            "换通道或关掉提示：界面左侧「设置」"
+            % (ver, DISPLAY_VERSION, channel_label(update_channel())))
 
 
 # ---------------------------------------------------------------------------
@@ -7371,6 +7554,8 @@ def build_parser():
     a("--check-update", dest="check_update", action="store_true", help="只检查更新，不安装")
     a("--no-update-check", dest="no_update_check", action="store_true",
       help="启动时不检查更新")
+    a("--settings", dest="settings", nargs="?", const="", metavar="K=V",
+      help="看 / 改设置：不带值就打印；channel=alpha|beta|mod、auto=on|off")
     a("--guard", dest="guard", nargs="?", const="status",
       choices=["install", "remove", "status"], help="运行时守卫：install / remove / status")
     a("--fetch-tools", dest="fetch_tools", nargs="?", const="", metavar="NAMES",
@@ -7524,6 +7709,8 @@ def main(argv=None):
         return run_update(True)
     if o.update:
         return run_update(False)
+    if o.settings is not None:
+        return do_settings(o.settings)
     if o.mac_check is not None or o.resign:
         given = (o.mac_check or "").strip()
         return run_mac_check([given] if given else [], bool(o.resign))

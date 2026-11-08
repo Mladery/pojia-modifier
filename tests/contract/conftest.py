@@ -44,6 +44,11 @@ class Box(object):
         # 否则零参数启动找不到界面 —— 沙箱要跟真实安装形态一致，所以一并拷。
         if os.path.isfile(GUI):
             shutil.copy2(GUI, os.path.join(self.prog_dir, "pojia_gui.py"))
+        # 界面本体在 ui/ 里（app.html / app.css / app.js），同样得跟着走，
+        # 打包形态就是「pojia_gui.py + ui/」这一对。
+        ui = os.path.join(ROOT, "src", "ui")
+        if os.path.isdir(ui):
+            shutil.copytree(ui, os.path.join(self.prog_dir, "ui"), dirs_exist_ok=True)
         self.home = self._dir("home")
         self.appdata = self._dir("appdata")
         self.local = self._dir("local")
@@ -75,9 +80,11 @@ class Box(object):
 
     def run(self, *argv, **kw):
         timeout = kw.pop("timeout", 300)
+        env = self.env()
+        env.update(kw.pop("env_extra", None) or {})
         return subprocess.run(
             [sys.executable, self.prog] + list(argv),
-            cwd=self.root, env=self.env(),
+            cwd=self.root, env=env,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             timeout=timeout,
         )

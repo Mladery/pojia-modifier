@@ -1,6 +1,6 @@
 # 破甲修改器
 
-> 产物名 `pojia-modifier`，对外版本号 **`v1.01.2-beta`**，MIT 正文 + Commons Clause。
+> 产物名 `pojia-modifier`，对外版本号 **`v1.01.3-beta`**，MIT 正文 + Commons Clause。
 > 后缀即渠道：`-alpha` 开发版、`-beta` 测试版、`-mod` 稳定版。
 > 仅限在**自己有权管理的本机设备**上使用，下载前请读 [完整免责声明](docs/disclaimer.md)。
 
@@ -28,7 +28,7 @@
 - **不是破解工具。** 不生成注册码、不伪造许可证、不绕过付费墙。它改的是你自己机器上的提示词文本。
 - **可逆、可审计。** 改前写旁路备份，`--revert` 一键还原；源码全公开，发布的 exe 由本仓库 Actions 从同一份源码构建。
 - **无后门、无遥测。** 无账号、无登录、无统计、无云控、**无静默更新** —— 从不自动下载、自动替换、自动重启。升级只有一条路：你按下「安装」（界面上的按钮 / 菜单 / `--update`）。核心流程（定位 → 备份 → 替换 → 校验 → 还原）全程离线。
-- **联网只做三件事，都只下载、都可关。** ① `--fetch-tools` 拉 busybox 与 Everything 的官方二进制；② `--git-bash` 拉 Git for Windows 安装包；③ 启动 / 打开界面时查一次「有没有新版」——只读 GitHub 公开的 `releases/latest`，不带任何本机信息、不发 query，结果缓存一天，查到了也只是一个提示加一个安装按钮。不想让它查：界面上点「以后再说」，命令行加 `--no-update-check`。
+- **联网只做三件事，都只下载、都可关。** ① `--fetch-tools` 拉 busybox 与 Everything 的官方二进制；② `--git-bash` 拉 Git for Windows 安装包；③ 启动 / 打开界面时查一次「有没有新版」——只读 GitHub 公开的发布列表（`releases`，最近 30 条），不带任何本机信息、不发 query，结果缓存一天，查到了也只是一个提示加一个安装按钮。不想让它查：界面上点「以后再说」，或设置里关掉「启动时检查更新」，命令行加 `--no-update-check`。
 - **后果自负。** 按现状（AS IS）提供，无任何担保。目标客户端可能异常、更新失效、配置损坏或账号受限 —— 这些风险由使用者承担。
 
 ## 界面
@@ -83,6 +83,8 @@ python src/pojia.py --clean-spill        # 清过期的会话快照（含明文 
 python src/pojia.py --guard install      # 装运行时守卫（Windows 计划任务）
 python src/pojia.py --check-update       # 只查有没有新版（只读，不下不装）
 python src/pojia.py --update             # 有新版就下、校验、替换
+python src/pojia.py --settings           # 看设置（更新通道 / 启动检查）
+python src/pojia.py --settings "channel=mod"   # 换通道：alpha / beta / mod
 python src/pojia.py --no-update-check    # 这次启动别查更新
 python src/pojia.py --fetch-tools        # 下 busybox / Everything 到用户目录
 python src/pojia.py                      # 不带参数 = 直接进图形界面（同 --gui）
@@ -96,7 +98,7 @@ python src/pojia_gui.py                  # 只起图形界面（本机网页）
 在客户端**新会话**里单独发一句 `破甲自检`（整条消息只有这四个字），只回一行就说明人格真载入了：
 
 ```
-破甲已生效｜版本1.01.2-beta｜仓库地址：https://github.com/Mladery/pojia-modifier
+破甲已生效｜版本1.01.3-beta｜仓库地址：https://github.com/Mladery/pojia-modifier
 ```
 
 回复带解释、加戏或拒答 → 人格没生效，先确认目标已**重启**（改的是磁盘文件，运行中的进程不会重读）。

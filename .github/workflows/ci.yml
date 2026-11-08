@@ -25,8 +25,13 @@ jobs:
         # 3.8 是脚本声明的最低版本（README 写着 Python 3.8+），必须真跑一遍；
         # 3.13 是为了提前发现「新版本把某个 API 删了」这类问题。
         # macos-latest 是 arm64，3.8 没有 arm64 构建，所以只挂 3.12。
+        #
+        # 3.8 那两条钉死旧镜像：ubuntu-latest 已经升到 26.04，预装清单里没有 3.8，
+        # setup-python 连下载源都找不到，直接红在「装环境」这一步 —— 跟代码无关。
+        # 3.8 是 2024 年 10 月 EOL 的，只有 22.04 还带它；哪天这个镜像下线，
+        # 就把 3.8 整条去掉、README 的下限一起抬，别再钉更老的镜像。
         include:
-          - { os: ubuntu-latest,  py: "3.8"  }
+          - { os: ubuntu-22.04,   py: "3.8"  }
           - { os: ubuntu-latest,  py: "3.11" }
           - { os: ubuntu-latest,  py: "3.13" }
           - { os: windows-latest, py: "3.8"  }

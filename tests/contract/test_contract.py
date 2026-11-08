@@ -7,6 +7,7 @@
 
 编号 C1… 与 `docs/spec/` 里的不变量编号对应。
 """
+import json
 import os
 import re
 import subprocess
@@ -47,7 +48,7 @@ REQUIRED_SWITCHES = [
     "--force", "--yes", "--quiet", "--menu", "--gui", "--version",
     "--persona", "--persona-name", "--persona-list", "--persona-set",
     "--persona-show", "--pick", "--clear", "--deep", "--dsh-mode",
-    "--zpatch", "--mac-check", "--uninstall", "--purge",
+    "--zpatch", "--mac-check", "--uninstall", "--purge", "--settings",
 ]
 
 
@@ -336,3 +337,93 @@ def test_revert_leaves_no_residue(box):
     box.run("--target", "claude", "--claude-dir", d, "--revert", "--yes")
     left = sorted(n for n in os.listdir(d) if not n.endswith(".pojia.bak"))
     assert left == ["CLAUDE.md"], "还原后还剩：%s" % left
+
+
+# --------------------------------------------------- C7 更新通道（梯度 + 持久化）
+#
+# 一次拉一页发布，在本地按渠道筛：alpha 收 alpha/beta/mod，beta 收 beta/mod，
+# mod 只收 mod。以前看 /releases/latest，预发布被整段跳过 —— 装 beta 的人
+# 永远等不到下一个 beta，界面自然「提示更新不生效」。
+
+_FAKE_RELEASES = [
+    {"tag_name": "v3.0.0-alpha", "draft": False,
+     "assets": [{"name": "alpha.zip", "browser_download_url": "http://127.0.0.1/a"}]},
+    {"tag_name": "v1.9.0-beta", "draft": False, "assets": []},
+    {"tag_name": "v1.5.0-mod", "draft": False, "assets": []},
+    {"tag_name": "v9.9.9-mod", "draft": True, "assets": []},      # 草稿不算数
+]
+
+
+def _serve_releases(payload):
+    """起一个只喂 JSON 的本地服务，返回 (server, url)。用完 shutdown。"""
+    import http.server
+
+    body = json.dumps(payload).encode("utf-8")
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, "http://127.0.0.1:%d/releases" % srv.server_address[1]
+
+
+def _update_json(text):
+    m = re.search(r"#update (\{.*\})", text)
+    assert m, "没打出机器可读的更新行：\n%s" % text
+    return json.loads(m.group(1))
+
+
+@pytest.mark.parametrize("channel,want", [
+    ("alpha", "3.0.0-alpha"),     # 三条都收，版本最高的那条
+    ("beta", "1.9.0-beta"),       # 不收 alpha
+    ("mod", "1.5.0-mod"),         # 只收正式版
+])
+def test_c7_update_channel_ladder(box, channel, want):
+    srv, url = _serve_releases(_FAKE_RELEASES)
+    try:
+        r = box.run("--settings", "channel=" + channel)
+        assert r.returncode == 0, box.out(r)
+        r = box.run("--check-update", env_extra={"POJIA_UPDATE_API": url})
+        assert r.returncode == 0, box.out(r)
+        data = _update_json(box.out(r))
+        assert data["latest"] == want, box.out(r)
+        assert data["channel"] == channel
+    finally:
+        srv.shutdown()
+
+
+def test_c7_update_skips_draft(box):
+    """草稿版本号再高也不能算「最新发布」。"""
+    srv, url = _serve_releases(_FAKE_RELEASES)
+    try:
+        box.run("--settings", "channel=mod")
+        r = box.run("--check-update", env_extra={"POJIA_UPDATE_API": url})
+        assert _update_json(box.out(r))["latest"] != "9.9.9-mod"
+    finally:
+        srv.shutdown()
+
+
+def test_c7_settings_round_trip(box):
+    r = box.run("--settings", "channel=mod auto=off")
+    assert r.returncode == 0, box.out(r)
+    r = box.run("--settings")
+    m = re.search(r"#settings (\{.*\})", box.out(r))
+    assert m, box.out(r)
+    data = json.loads(m.group(1))
+    assert data["channel"] == "mod"
+    assert data["auto_check"] is False
+
+
+def test_c7_settings_rejects_junk(box):
+    r = box.run("--settings", "channel=nightly")
+    assert r.returncode != 0, "乱填的通道被接受了：%s" % box.out(r)
+    assert "alpha / beta / mod" in box.out(r)

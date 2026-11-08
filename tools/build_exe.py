@@ -36,6 +36,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "src")
 CORE = os.path.join(SRC, "pojia.py")
 GUI = os.path.join(SRC, "pojia_gui.py")
+UI = os.path.join(SRC, "ui")
 
 SETUP_TMPL = '''\
 from setuptools import Extension, setup
@@ -289,6 +290,12 @@ def main():
         # GUI 是数据文件：核心用 runpy 在进程内跑它。漏了这条，产物就没有 --gui。
         "--add-data", GUI + os.pathsep + ".",
     ]
+    # 界面本体（app.html / app.css / app.js）整目录带进去，落点是 _MEIPASS/ui。
+    # 只带 pojia_gui.py 不带这个目录，界面起来就是一张「界面文件没找到」的提示页。
+    if os.path.isdir(UI):
+        cmd += ["--add-data", UI + os.pathsep + "ui"]
+    else:
+        log("警告：找不到界面目录 %s，产物里将没有界面" % UI)
     # 版本号也是一份数据文件，和 GUI 放同一层（解包后是 _MEIPASS/_version.txt）。
     vfile = write_version_file(CORE, os.path.join(spec, "_version.txt"))
     if vfile:
