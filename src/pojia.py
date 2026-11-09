@@ -2124,8 +2124,8 @@ def _proc_image_path(pid):
     为什么不从命令行里抠：命令行是应用自己拼的字符串，套壳启动器会改写它，
     双击启动时里面往往只有 exe 名、没有绝对路径。镜像路径由内核在启动时记下，
     进程自己改不了 —— Windows 走 QueryFullProcessImageNameW，Linux 读
-    /proc/<pid>/exe。权限不足（别人的进程、提权进程）返回 ""，由调用方退回
-    命令行那一路。
+    /proc/<pid>/exe，macOS 没有 procfs，用 libproc 的 proc_pidpath（等价物）。
+    权限不足（别人的进程、提权进程）返回 ""，由调用方退回命令行那一路。
     """
     try:
         pid = int(pid)
@@ -2156,6 +2156,20 @@ def _proc_image_path(pid):
                     return buf.value or ""
             finally:
                 k32.CloseHandle(h)
+        except Exception:
+            return ""
+        return ""
+    if sys.platform == "darwin":
+        # macOS 没有 procfs，libproc 的 proc_pidpath 是等价物
+        try:
+            import ctypes
+            import ctypes.util
+            lib = ctypes.CDLL(ctypes.util.find_library("proc") or "/usr/lib/libproc.dylib")
+            lib.proc_pidpath.restype = ctypes.c_int
+            lib.proc_pidpath.argtypes = (ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32)
+            buf = ctypes.create_string_buffer(4096)
+            if lib.proc_pidpath(pid, buf, 4096) > 0:
+                return buf.value.decode("utf-8", "ignore")
         except Exception:
             return ""
         return ""
