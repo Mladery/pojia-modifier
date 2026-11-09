@@ -1,6 +1,6 @@
 # 破甲修改器
 
-> 产物名 `pojia-modifier`，对外版本号 **`v1.03.4-beta`**，MIT 正文 + Commons Clause。
+> 产物名 `pojia-modifier`，对外版本号 **`v1.03.5-beta`**，MIT 正文 + Commons Clause。
 > 后缀即渠道：`-alpha` 开发版、`-beta` 测试版、`-mod` 稳定版。
 > 仅限在**自己有权管理的本机设备**上使用，下载前请读 [完整免责声明](docs/disclaimer.md)。
 
@@ -84,6 +84,7 @@ python src/pojia.py --apply --target dsh --dsh-mode preset   # DSH：不改官�
 python src/pojia.py --apply --target wb --full               # WorkBuddy：五层开关一次做完
 python src/pojia.py --clean-spill        # 清过期的会话快照（含明文 Key）
 python src/pojia.py --guard install      # 装运行时守卫（Windows 计划任务）
+python src/pojia.py --session-guard on   # 装 DSH 会话守卫（拒答续命 / 异常续跑，Cordis 插件）
 python src/pojia.py --check-update       # 只查有没有新版（只读，不下不装）
 python src/pojia.py --update             # 有新版就下、校验、替换
 python src/pojia.py --settings           # 看设置（更新通道 / 启动检查）
@@ -101,7 +102,7 @@ python src/pojia_gui.py                  # 只起图形界面（本机网页）
 在客户端**新会话**里单独发一句 `破甲自检`（整条消息只有这四个字），只回一行就说明人格真载入了：
 
 ```
-破甲已生效｜版本1.03.4-beta｜仓库地址：https://github.com/Mladery/pojia-modifier
+破甲已生效｜版本1.03.5-beta｜仓库地址：https://github.com/Mladery/pojia-modifier
 ```
 
 回复带解释、加戏或拒答 → 人格没生效，先确认目标已**重启**（改的是磁盘文件，运行中的进程不会重读）。

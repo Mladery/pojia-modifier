@@ -155,7 +155,12 @@
 | `--persona-set <names>` | 设定启用的人格片段组合 |
 | `--persona-list` / `--persona-show` / `--persona-explain` | 只读查看 |
 
-**其它**：`--guard`（运行时守卫）、`--git-bash`、`--mac-check`、`--resign`、`--gui`、`--menu`、`--version`、`--help`。
+**其它**：`--guard`（运行时守卫，Windows 计划任务）、`--git-bash`（接管 bash 工具）、
+`--session-guard on|off`（DSH 会话守卫，拒答续命 / 异常续跑）、`--mac-check`、`--resign`、
+`--gui`、`--menu`、`--version`、`--help`。
+
+`--session-guard` 有两副面孔：带 `--apply` 时它只是个开关（默认 `on`，`off` 表示这次
+不装）；不带 `--apply` 时它是独立入口，只装/卸这个插件，不碰人格文件。
 
 ### 4.2 约定
 

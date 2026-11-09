@@ -238,5 +238,10 @@ ZCode 的系统提示词嵌在 `zcode.cjs` 里，是一个 JS 字符串常量。
 - 20 个目标逐个跑"注入 → 再注入 → 撤回"，字节级一致。
 - 目标目录不存在时，注入能自建，撤回能删干净（不留空目录）。
 - DSH 解包后，注入点文件存在且被正确改写；还原后解包目录被清除。
+- DSH 会话守卫：`--apply` 后每个 profile 的 `node_modules/pojia-session-guard/` 齐两个
+  文件、patch 层有一段带标记的 `- insert:`；重复执行只留一段；`--revert` 后
+  `cordis.patch.yml` 逐字节回到原样，插件目录消失。
+- 破甲模式、Git Bash 接管、会话守卫三段写同一个 `cordis.patch.yml` 时互不覆盖，
+  合并结果仍能被 YAML 解析器解析。
 - WorkBuddy 多模板中有一份失败时，其余仍成功，退出码为 1。
 - ZCode 的 JS 文件被改后仍能被 node 解析（若环境有 node）。
