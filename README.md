@@ -235,7 +235,9 @@ python tools/embed_policy.py && git status --porcelain   # 必须为空
 
 ## 致谢
 
-按并入主线的时间排序，只列代码与文档改动。
+[![贡献者](https://contrib.rocks/image?repo=Mladery/pojia-modifier)](https://github.com/Mladery/pojia-modifier/graphs/contributors)
+
+按并入主线的时间排序，只列代码与文档改动。头像墙按提交记录自动更新，新名字出现即上榜。
 
 - **[zixuan203344](https://github.com/zixuan203344)** —— Reasonix、Trae CN、Qoder CN 三个目标的适配（`v1.03.3-beta`），目标数 17 → 20；一并修掉第二落点撤回后残留、技能文件 YAML 头被覆盖、旧版本块叠加三处问题。
 
