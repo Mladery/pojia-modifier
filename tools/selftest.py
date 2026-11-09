@@ -7,6 +7,7 @@
 只比字节，不看内部结构。
 """
 import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -74,6 +75,25 @@ def write(path, data):
 
 CLAUDE_MD = b"# my rules\r\n\r\n- keep it short\r\n"
 
+# WorkBuddy 的两个目标走的是「替换式注入」：只有文件里本来就有 <content_policy>
+# 段才改写它，没有就跳过。所以假安装必须造出真安装的样子 —— 模板和
+# cli/product.json 都带原生政策段，否则 apply 只会回一句「已是最新」，
+# 这条自检等于什么都没验。
+WB_POLICY = ("<content_policy>\r\n"
+             "You must follow the safety policy.\r\n"
+             "Never discuss restricted topics.\r\n"
+             "</content_policy>\r\n\r\n"
+             "<system_reminder>\r\n"
+             "reminder v1\r\n"
+             "</system_reminder>\r\n")
+
+WB_TPL = "# system\r\n\r\n" + WB_POLICY + "\r\n# tools\r\n\r\ntool docs\r\n"
+
+WB_PRODUCT = json.dumps(
+    {"prompts": [{"id": "system", "template": WB_TPL},
+                 {"id": "other", "template": "plain text, 不含政策段"}]},
+    ensure_ascii=False, indent=2)
+
 
 def seed(root):
     """-> (key, argv_extra, 需要比对的目录)"""
@@ -92,9 +112,11 @@ def seed(root):
     # 2 wb
     w = os.path.join(root, "wb")
     write(os.path.join(w, "resources", "app.asar.unpacked", "resources", "templates",
-                       "workbuddy-prompt.tpl"), "你是 WorkBuddy。\r\n{{persona}}\r\n")
+                       "workbuddy-prompt.tpl"), WB_TPL)
     write(os.path.join(w, "resources", "app.asar.unpacked", "resources", "templates",
                        "product-a.tpl"), "产品模板 A\r\n")
+    write(os.path.join(w, "resources", "app.asar.unpacked", "cli", "product.json"),
+          WB_PRODUCT)
     data = os.path.join(root, "wb-data")
     os.makedirs(data, exist_ok=True)
     cases.append(("wb", ["--wb-install", w, "--wb-data", data], w))
@@ -103,7 +125,9 @@ def seed(root):
     wi = os.path.join(root, "wbintl")
     write(os.path.join(wi, "WorkBuddyAI.exe"), b"MZ")
     write(os.path.join(wi, "resources", "app.asar.unpacked", "resources", "templates",
-                       "workbuddy-prompt.tpl"), "You are WorkBuddy.\r\n")
+                       "workbuddy-prompt.tpl"), WB_TPL)
+    write(os.path.join(wi, "resources", "app.asar.unpacked", "cli", "product.json"),
+          WB_PRODUCT)
     di = os.path.join(root, "wbintl-data")
     os.makedirs(di, exist_ok=True)
     cases.append(("wbintl", ["--wbintl-install", wi, "--wbintl-data", di], wi))

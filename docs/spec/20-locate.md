@@ -236,8 +236,13 @@ DSH 的备份不是就地加后缀：如果落点在"打包二进制"目录里�
 | 3 | 环境变量（见 2 表最后一列） |
 | 4 | 平台默认位置（见 2 表，本质就是固定表） |
 | 5 | 按盘符有界遍历（必须有时间预算） |
-| 6 | 运行中进程的命令行反推 |
-| 7 | 注册表 / 包管理器元数据（仅 Windows） |
+| 6 | Everything 索引（装了才有，没有就静默跳过） |
+| 7 | 运行中进程：**先问内核要镜像路径**，拿不到再看命令行 |
+| 8 | 多版本切换器配置（wb-switch / cc-switch，仅 Windows） |
+| 9 | 卸载登记表（仅 Windows） |
+| 10 | 开始菜单 / 桌面 / 任务栏的快捷方式 |
+
+前四条是"读现成记录"，5、6 是"实扫"，7～10 是"从别处反推"。**顺序即执行顺序**，命中即停。
 
 ### 4.1 有界遍历
 
@@ -250,19 +255,56 @@ DSH 的备份不是就地加后缀：如果落点在"打包二进制"目录里�
 
 ### 4.2 进程反推
 
-- 命令行必须**同时**命中"包管理器缓存路径（含 `_npx`）"**与**"目标包名"才算数。
-- 只判断包名会误判；只判断路径会误判。
-- 切路径时注意 Windows 的反斜杠与引号。
-- 只取存在的目录。
+两级：**镜像路径优先，命令行兜底**。
 
-### 4.3 注册表（仅 Windows）
+- 镜像路径由内核在启动时记下，进程自己改不了 —— Windows 走 `QueryFullProcessImageNameW`（`OpenProcess` 用 `QUERY_LIMITED_INFORMATION`），Linux 读 `/proc/<pid>/exe`（末尾的 ` (deleted)` 要去掉）。权限不足（别人的进程、提权进程）返回空串，不抛异常。
+- **不许只靠命令行**：双击启动、或套壳启动器把 exe 名当参数传时，命令行里没有绝对路径。也不能要求命令行必须含 `_npx` / `node_modules` / `program files` —— 那会把大量正常安装漏掉。
+- 拿到路径后统一走"往上找安装根"，见 4.5。
+- 切路径时注意 Windows 的反斜杠与引号；只取存在的目录。
 
-- 读卸载项里的 `InstallLocation` / `DisplayIcon`。
-- 只读，不写。权限不足静默跳过。
+### 4.3 切换工具配置（仅 Windows）
 
-### 4.4 结果记录
+wb-switch / cc-switch 这类多版本切换器必须记住每个版本的绝对路径，否则切不过去。
 
-命中后记两件事：**从哪一步找到的**、**找到的根路径**。用于日志与后续复用。
+- 扫 `~/.wb-switch`、`~/.cc-switch`、`%APPDATA%` / `%LOCALAPPDATA%` 下的 `com.wbswitch.app`、`com.ccswitch.desktop`。
+- 只读文本型配置（`.json` `.jsonl` `.info` `.conf` `.yaml` `.yml` `.txt` `.ini`），深度 3 层以内、单个 ≤4MB。
+- JSON 里的路径是**双反斜杠**写的，先归一成单反斜杠再匹配。
+- 不解析格式，正则抠 `<盘符>:\…\<exe 名>` 即可 —— 这些工具换过好几版配置结构，解析器跟不上。
+
+### 4.4 卸载登记表（仅 Windows）
+
+同一个安装目录有四种写法，逐个试，取第一个能落成目录的：
+
+| 字段 | 形态 | 取值 |
+|---|---|---|
+| `InstallLocation` | `C:\Program Files\Foo` | 本身就是目录 |
+| `DisplayIcon` | `"C:\…\Foo\app.exe",0` | 砍掉 `,数字` 后取所在目录 |
+| `UninstallString` | `"C:\…\Foo\unins000.exe" /S` | 砍掉 `/S` 后取所在目录 |
+| `InstallPath` | `C:\…\Foo\bin` | 取目录，再往上找安装根 |
+
+- 以 `{` 开头的值是 MSI 产品码，对应目录在 `C:\Windows\Installer` 下，直接放弃。
+- 值里可能带 `%ProgramFiles%`，先展开；展开后仍含 `%` 的丢掉。
+- 只读，不写。权限不足静默跳过。扫 `HKCU` / `HKLM` / `HKLM\WOW6432Node` 三处 Uninstall。
+
+### 4.5 往上找安装根
+
+可执行文件常在 `bin` / `resources` / `app` 子目录里，所以命中路径后要往上翻：
+
+- 层数上限 5 层；`Program Files`、`AppData`、`Users`、`bin`、`resources` 这类**通用目录名永远不算安装根**，遇到就继续往上，但绝不停在那里。
+- 盘符根直接收手，不许把盘符根判成安装根。
+- 判据优先用目标自己的 `is_install`（带标志物），没有才退回 `is_valid` —— `markers` 为空时 `is_valid` 对任何目录都返回真，拿它往上层翻必然判错。
+- 任何异常一律当"不是"，定位链不许断。
+
+### 4.6 快捷方式（仅 Windows）
+
+- 位置**逐个问 shell**（`SHGetFolderPathW`，取不到再读 `User Shell Folders` 的 HKCU + HKLM），**不许拼 `%USERPROFILE%\Desktop`**：桌面和开始菜单会被 OneDrive 备份、组策略漫游、第三方"桌面搬家"工具重定向，拼出来的路径直接指空。
+- 要覆盖的六处：`Desktop`、`Common Desktop`、`Programs`、`Common Programs`、`Start Menu`、`Common Start Menu`；另外收任务栏固定项 `…\Quick Launch\User Pinned\TaskBar` 与 `…\StartMenu`。
+- 解析 `.lnk` 只认 LinkInfo 的 `LocalBasePath(-Unicode)` 与环境变量块，其余块跳过；解不出来就跳过下一个。
+- 命中的可以是 exe 名，也可以是**所在目录名**（有些安装的 exe 名跟产品名对不上，但目录名对得上）。
+
+### 4.7 结果记录
+
+命中后记三件事：**从哪一步找到的**（来源标注）、**找到的根路径**、**试过的路径**。来源标注要带到 `--status` 上 —— 定位错了能一眼看出是哪一层判的。
 
 ---
 

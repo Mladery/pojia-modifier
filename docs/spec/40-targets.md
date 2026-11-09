@@ -78,7 +78,7 @@
 | `codex` | Codex | `~/.codex` | `config.toml` | 字段注入 + 独立人格文件 |
 | `cursor` | Cursor | `~/.cursor` | `rules/<规则名>.mdc` | 标记块 |
 | `claude` | Claude | `~/.claude` | `CLAUDE.md` | 标记块 |
-| `antigravity` | Antigravity | `~/.gemini` | `GEMINI.md` | 标记块 |
+| `antigravity` | Antigravity | `~/.gemini` | `GEMINI.md` + `config/rules/pojia.md` | 标记块 + 整文件（两份拆写） |
 | `qwen` | Qwen Code | `~/.qwen` | `QWEN.md` | 标记块 |
 | `iflow` | iFlow CLI | `~/.iflow` | `IFLOW.md` | 标记块 |
 | `trae` | Trae | `~/.trae` | `rules/project_rules.md` | 标记块 |
@@ -99,7 +99,7 @@
 | `codex` | `CODEX_HOME` | `codex` / `codex-code-mode-host` | 安装根与配置根是同一个 |
 | `cursor` | `CURSOR_HOME` | `Cursor` | 规则文件在 `rules/` 子目录；另有旧的 `.cursorrules` 需同步 |
 | `claude` | `CLAUDE_CONFIG_DIR` | `claude` / `Claude` | 桌面版与 CLI 同名进程 |
-| `antigravity` | `GEMINI_CLI_HOME` | `agy` / `antigravity` | 主目录名仍是 `.gemini`（历史原因）；规则文件有字符数上限 |
+| `antigravity` | `GEMINI_CLI_HOME` | `agy` / `antigravity` | 主目录名仍是 `.gemini`（历史原因）；单文件 24,000 字节封顶且**从尾部截断**，所以正文拆两个文件写：`GEMINI.md` 只放政策本体，执行纪律与 Gemini 专用段写进 `config/rules/pojia.md`（带 `trigger: always_on` 前置头） |
 | `trae` | `TRAE_HOME` / `TRAE_CN_HOME` | `Trae` / `Trae CN` | 国内版与国际版目录名不同 |
 | `codebuddy` | **无** | `codebuddy` | 不要用 `CODEBUDDY_CONFIG_DIR`：桌面宿主会指向它自己的数据目录 |
 | `opencode` | `OPENCODE_CONFIG` / `XDG_CONFIG_HOME` | `opencode` | 遵循 XDG 布局 |
