@@ -233,6 +233,14 @@ python tools/embed_policy.py && git status --porcelain   # 必须为空
 
 不写代码也帮得上忙：报一个能复现的 bug、补一段某客户端的安装路径、把 README 里过时的说明指出来，都算。
 
+## 致谢
+
+按并入主线的时间排序，只列代码与文档改动。
+
+- **[zixuan203344](https://github.com/zixuan203344)** —— Reasonix、Trae CN、Qoder CN 三个目标的适配（`v1.03.3-beta`），目标数 17 → 20；一并修掉第二落点撤回后残留、技能文件 YAML 头被覆盖、旧版本块叠加三处问题。
+
+想加自己正在用的客户端，照着 `docs/spec/40-targets.md` 的落点表补一个类，跑一遍 `tools/selftest.py` 再提。
+
 ## 许可
 
 **MIT 正文 + Commons Clause，Copyright (c) 2026 Mladery。** 许可正文见 [LICENSE](LICENSE)，目录职责与运行时标记见 [NOTICE](NOTICE)。
