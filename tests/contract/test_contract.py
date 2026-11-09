@@ -103,7 +103,7 @@ def test_c2_no_args_opens_the_gui(box):
 
 
 def test_c2_help_lists_every_target_dir_flag(box):
-    """17 个目标各自的手动指定开关。名字不统一是历史原因，这里逐条钉死。"""
+    """20 个目标各自的手动指定开关。名字不统一是历史原因，这里逐条钉死。"""
     flags = [
         "--dsh-dir",                                        # dsh
         "--wb-install", "--wb-data",                        # wb
@@ -114,6 +114,7 @@ def test_c2_help_lists_every_target_dir_flag(box):
         "--qwen-dir", "--iflow-dir", "--trae-dir",
         "--codebuddy-dir", "--opencode-dir", "--windsurf-dir",
         "--cline-dir", "--copilot-dir", "--kiro-dir",
+        "--reasonix-dir", "--traecn-dir", "--qodercn-dir",
     ]
     r = box.run("--help")
     text = box.out(r)

@@ -67,7 +67,9 @@ print("OK", len(text), len(out))
 
 def _write(tmp_path, text):
     p = tmp_path / "_memory.md"
-    p.write_text(text, encoding="utf-8", newline="")
+    # pathlib 的 write_text 直到 3.10 才收 newline，CI 上跑的是更早的版本
+    with open(str(p), "w", encoding="utf-8", newline="") as fh:
+        fh.write(text)
     return str(p)
 
 

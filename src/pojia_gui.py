@@ -267,6 +267,9 @@ REGISTRY = [
     ("cline", "Cline"),
     ("copilot", "Copilot CLI"),
     ("kiro", "Kiro"),
+    ("reasonix", "Reasonix"),
+    ("traecn", "Trae CN"),
+    ("qodercn", "Qoder CN"),
 ]
 
 ACTIONS = [

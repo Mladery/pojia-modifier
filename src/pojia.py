@@ -43,8 +43,8 @@ import zlib
 # 0. 常量与运行时开关
 # ---------------------------------------------------------------------------
 
-VERSION = "1.03.2"              # 护照里只存这个，纯数字
-DISPLAY_VERSION = "1.03.2-beta"  # 界面上给人看的：跟 Release tag 一致
+VERSION = "1.03.3"              # 护照里只存这个，纯数字
+DISPLAY_VERSION = "1.03.3-beta"  # 界面上给人看的：跟 Release tag 一致
 APP = "POJIA"                   # 护照里的 tool 字段，磁盘契约，别改
 DISPLAY_NAME = "破甲修改器"      # 只用于对外文案
 
@@ -1435,174 +1435,186 @@ def _crlf(s):
 
 
 POLICY_BODY = POLICY_BODY = _crlf(_unpack(
-    "eNqFfFlvI9mV5nv+CiL8ZqA946W7Z/qtupaewpRdNZk18PSTUXYnbLeru4xyYTBGowFSEimS4iaJWklJpERJ1MJFqY07gf4p"
-    "bt4bwaf6C/1959wIMrPcGCCRSQZv3Lj33HO+850l8nux2bg66x3a8tRv7b54Yau3dnfd1s/sfgef56tNf/zGP1xbHvXv8RXT"
-    "Xp318hhjijWTrZlq0zbr5nhj1t+Y9bIYbxq7uNfm1mfDxrej3Kx/ouNnvfisdz0bDGxtFLQnpn347egQswWdB7tfCKYH+NU8"
-    "n+NxJjeYr+dmg0uzPpgN47N++t/jidnw3BSzprtpd7pmvebfDTGtjuFDU0nT7mN5L15873sxPCr2b88x3cKLF38R8wsdc7rK"
-    "5+V37HYezwjiSdyGfZpq14ziprgZjsn5F0N/MLXpXf8yYasZf7zpD6uc+i9iQWeIGzFPNAlmwJbwazDZ5nJ7edPpQwQmncKc"
-    "mM2+qXOS29tZL2N3+7PRoV/dMOmuThjNwznTJdN/mPW2IW65kpv1BsE6hHLHHYpogoeT4OGMx5C9spkNm8vMhrv+8AADgss1"
-    "SHbWK5jRwAwubOYyqOdkkrxJHNps1iTvIwENchRQkFs1lQfITk4iZ3ceVKAvXsxP9+1RaTFZ9TYY3PAcj9e4zEzWrBchIVvu"
-    "mxQf7pdSfvkO0+OYZr2Nd1TI9HpY3WzQmA33/cyVLCpuJhv6TCwfz8QSXrz4/vdNO2OSTWzWb258O0rb8nC+/2bWa8wmlzya"
-    "6olpH5tiJ5iWsLvZ8MyvJb4dZb7/fcovc2OLRXPQxLJtNW+ydSihP+h/O6qYvaQtnFKLeq35HnY54JjHxBy72Liw6WuOKebN"
-    "CCqU8IebUE4MiP389S9jf/jN6y+/xM/BtGoLl/jZ5hKzftLkdimdUmG+17TVgUk/Ycz7P4r5w7XZ8IlPmtZtbZ2PkSP2bzoY"
-    "8Pr//f7Lr377TUwXjlG//+KPX371xT/E/PIJ5Spr10f+6qt/eM1Vrbdsvm3zO0HhGb/Nt7bndyOIxySfZc1nsDIuZDtterno"
-    "ur1vmuQ5psMjaBqt/dm0jcPicno9my7q12j8PJ4ypU2Vul6cb0+o1BcJFblu8U/xMv7oFR76/dAfwroLaiK6UUqodebX2zSv"
-    "4ycoDK7MywdBp2Ma1BOdBLqEyWej60gUtn6Fvz17sWKmjzZ+iQ/BtOvxQAYdKIGZ1G1liuFmOwHV82bD5GxSsTsHpnXhUcny"
-    "tdk4799e0DpkD1xloct1QB2zcVvFEeSAOGZzbEp5vW7WxwAUNRMBtT3Tvof1iaVAHdMV7AmKOBsOZ+Od2Xg7OEtEZhFpnlou"
-    "tKq/AfXCzPPqm/l1k7uARqYO+NzUARSbVjSGgReCyzOTgeWmguwKD0xmCC63gsybxSRHxzB/uzblA/NZU8rZtaJdTbpbjhNQ"
-    "Knv4YLIVCCmox4PkOWWNjac3+Qh5lk2UbHyX4w/35sNN+3htRzcUd+YScuaH7TwUm6d4kTDTHFAC50qdSGybyTMAZ350SvEW"
-    "D3AckAwXU8zbh0lwmcKCaRprxaBzJJvi+qlwiWJwmSAcvC2woJOHLD2Vjufpkjwv2qjn6SI8SBanoZBG4W3lPLty6+9uekAO"
-    "W3uOAJeOBR5jm2qOVTq8g18ShxC0LsxmltaoYH0vBpHMA0PNWRduB4pkqgN70IElB521oA0cygWdc10ht13tErWhHM91PC5U"
-    "i2LOLzfnVOPCbFhQwLbPd9iif3IedFKiFlgDIFC1kM/NF4N2mxIfFe3DMTyYSfMkTPoKkyma2N7ePF7EE+39DhbDXxfmiJEp"
-    "e1yififTBP1W2dbTolt5fFUb5UE6rcqpkUEIfmMAXTSZfNCMuy3Q7kopMyry3MYdgJZ6GFm5art/mcciOX/iEB6LaJ0uLXxs"
-    "hi5k2QkDpjH+xQtTvIbLE4/e0AlmvTLMNboCJxic3tiNLX945JbZHpgLaMuOySWDs6T4ezr+oNOCU+bWz7r+ZVcvqujFYfzw"
-    "B7FgdTyP12hAjUsqTLM+GzVmgzoPL7cLcCCClE/gdyj68sR0iUi21qOt3Oz7kCm05ICHrQhGSaWfOKdwGG74Rz8AZJ/7+zf+"
-    "3jXd3ual7SRMZWzaT7CXebltTgY+DLA9sbtjaLhfflSrJEJ1H/ik+CE8Aj+sbwbHef40aOAit5Yb+rt7etRkWoVL8SYZeH+/"
-    "QhildT/dYwGLfYrj9hsTSBLL9WsP5qgogCuYkHgiUJSHZn242MMLFb89qgNgwFAWXrjajIgATRa6vts1p8fiLvOgGDgx2ynb"
-    "zJUZ1aKLHr3w6pjnCMmUm54tNE1/Kk8y6QY8KLQY6gUDncdLeCp4kZ+8pHLJIuarY1rqJv5uUcWKHZNMBO0etjPfa4N/mO6d"
-    "bTX84bY9OnFmPU1C0+3qPdnUIGdv6/I0fIv9KIYpeeLpBt0l8H6taCoTZ1TH1Qjgg0fwkMvQ9lZI1koih/M9dWfkSkIkeCDt"
-    "etDmoZnibtChkyKyVMQsG3lYtUnegjyqPZPrYf5QkhHtUbMSZ02z0CMF9MBFYrxnM9vQK3glzwvaV/ROiardTNGjWdhraRxM"
-    "K/bonGvN75hil9S5sS5wsgPG7N8c+Cv96OtshONxwKNeWeXst/f+M3VV3eg827sVsG5acqHrQaPgoYDQQiTwb7U5v7rFEp+y"
-    "/sad5wFD7VEc14s42lUPqgWRCrpTCIAPsC9TXHnLtYpSzCZHOCBl/rPhLeRMr3IB+6ipcbvxch2yCbqJEHFMpULEsYWt+QE4"
-    "TxzwBFIBSs7YJbN8wcRHZrKHtQHxdDiddDYbhTgGfjFd8vBcs56bX01mg4ISz6Dd8oerfzaW8cg/156gT7BED7o4rw9BMwH/"
-    "wBIzXdUJPFpt+Y5bEAK+sLxrXRtnxaqKJQ5Jl/ybDQyJFuaDax+dkM2LHqk4NcBytAukadjgJK3SvJJSQeKibdFJg3lhvAYb"
-    "cAHzlbMIgtW6ojGmcMLgp3sXXVc9DdkZgxDCpNAmAlBmgA8KxyD4HN/p2+wewXKJsvMW5RnpXfWhyqDEhpzP1DnVWy4Cytw6"
-    "GKjzOyHB1MgKx5uJE/0Sj2ZyvThD4AOwRS8uncDC1FcZymF6BTWQYCAduEecPvH0xhQQhj1J7PjGv07weE2lhuODyBgdikzJ"
-    "uWrP4tuqwflU2APlFV1XqSnqFfPBdB22ioiWk12sAHhIV27rpnIMZx2Z12yQWoq2CzzQ8AThium1sk3BjJycYF5wAqiiGkaG"
-    "EqdegGVhgzqZxlrm+Y0/LJr0FiyNk036/k5uEfSVxX4EGYPnDtQUos1m1fZNrj9P5uHmcbomvacIKcB8badx+zDUAaSlXFMc"
-    "gQ54hkmD21YoXb29exc8dh261Bm/kjpL3Dcb7YO1uMNxnj/Dk5keQquoN9M4oI4fmnX/Pks32ymb3SFJdOE6mBzzRoQwgi1i"
-    "GDW4csL7wtAQUAuBEn67rcBoN6YASblyA5h2oVmiY8tPMCCeaKtkTk7sMRwTSRYA2kAH0ylgIL6++l+fxBQF8eX/vHqFv99/"
-    "9fIj/qL/4BhBnoAXM/GOQEggIq9Xr20hjc9BewqPJhxgGEw21VvwufB9w0Y0N1AB8B57+f6HYix5M8BB7kEZ8PXn732EyHIH"
-    "6sVprsFQEwia9ErsT6mtGGNoCaZBFHG09LKTC9M5kXiVQbBo7jnixYhw8kOpoJ95zr0LXRAjUBeWao5CfYGsn1Ei97h2Z87u"
-    "OTcWn8qBeIoDgotP6UFCXTSoc5soPktczeXaWh0bkEVr9gV2RGN4TEjEf0gfMc7rKA3OhK2t81HQ98sh+WodRAnntgeME0qV"
-    "N0NG9H5rgsBONtaBCamg5MCPfMSJlWM7PDQZpiZc9kW8GjcUBvfq13ilNMbalsN9fP76q6+++d1vv3E8QCRAo++uBp0d9/ng"
-    "0G6cqEDcfs/i9nFD9js/LDO3JHkmv1b2r55wHmbCoCU6Pw2Ho7SBbZ3PrxtuteJrNaKHbxdLudYDof5qcmLvHMqu0g0VGlAP"
-    "C5vHM3bj6q3Tl9TC0jTykK1jM9iWzTC1YHaf7cMWN9OYMBLRnyTZoGohj8JJmGQPoT68OGUH0pOmxZk+dshQdH5QmsdP3BP2"
-    "av6ASGqLdZvZAOHH589++j8//gD/vvxI/gm2j/yM20Z2W4cE41ubZw5HH6zKShwoUK0pMTFERvbl5nIyAM9E8D0frmEAtUXc"
-    "Ep+fLomDSfzs1Uc/F6XJ6XfEsIiy9em5jMJjFNPDaZFVStAI9bMb+eX43m2xPLVvhiL6lCm+kXN5mg1UC/zKA5d8Acd37IIf"
-    "wXxl1oycx049zU5KvTDI+HxnKnpaCkrnocUr8IGhAvB1JqpR4QTCt70kCKGbJvkkZIuudX6agq4srUPBmWLMMUlpkjfc1AJR"
-    "ybuSLfqNSKRmvEXCnNv9Dm1EoIqAn5kh9eCVNgwXHgCPVLv8+DMBxgFURS/MhruQefBw4SBC83uX286MQ/RgOmDviavMZkmR"
-    "ZQUMhcI1cfvDPOiZJhPDxOI2HgRM+fy9l3/34eeY8INPf/rexz/Dhw9/9sFnn378M1777L2X7/1U/v37Tz59j9r36UcfvfpQ"
-    "f/r8/f/xi7/9+88Jya8+fPnxe59QRz/95MNfvBd++Fv+9N5PP/uEY15++Op/f/L5Lz74+KUIT+NvZRWeSoP0LKQ3Htzl/CDv"
-    "Dy6xFU13RQlz3lfMw2+QW0uSo0a2UdrzSJlKYDN7sIZ3RKBoQdG0zqlL3c1FtL4qGfEy8ZULiwshFcdfvObDJCcGLqHL5FkI"
-    "TkUOjpmS/j08lMuhgTkK2QCTgnUTtQcA/xXPpjejnLVmYRFbM4CQTHv7mLDebiCSwKDUQexXX3/xq9/902vPe//zjzzeTK41"
-    "3AbQeItoSlI1i0BiknQuEAJZyuXIXqPI5TeY1/N++cfff/GHP3jeP37x2y9/+fXrL363CGkUnj1Gv6EWR3lCiEKDGX2iUiab"
-    "vQEEKJkMpmP16XpUuH15qc6U24zNdXKmh2SShVHdSPpEiisATNyOSFZkb/L3ShyguYAym35WpSahe8bu1xTw1URAmRztFjfK"
-    "KxIgYhJlSqERVhAFzY+OmfPaZ1ysMwOMERHqRulGEdU+nHJDsoAoR6ab00qNRjSrY5OtuEA9mQa5RWSOr9GSoVWivBJ9cnTi"
-    "0CNrfVPnZhQn1CDErjlHO+6ftJQpM7dQz0F6mtzic0g6r2E6CF/m+0NTpwG5w3JxZtqJD2omLtzFGTVWj/xMWqWDyA9EC1gV"
-    "3NUdAdVMNHg/lD9XdZMUhqSL4CUAKzBR8aWhrJlzEBvWFCRJS/Ea23boJQk7SnhpDI1WvCaXIDRGUrZv0Rj1aGQp+3TbxMjh"
-    "QDCsumB9w+2gPXC5k8meP9qFy2Vy9009eN6U6I4QAMvyyD8FxyWy6TtkBLsnPhzVmXDRHIY8VvHqLaZ+qFnGWW+4VLlJv1N8"
-    "idYd7UdS0Hl/3FbcgJCjDCUMc76ejWQOkcU+//SDT2P+1QBsikl9W0/Z4ydvXn+ylWmYOaW8R4PwmKlgWATI6Hy4H7QbDPaT"
-    "aeiXBivQFUW3d3RFdVWDFT57vAfXIiPfgBrN6/2gfeVsIkfY9OttPh/PFWXFU6Cppn4T4a0/vPSHLZeZEqjWKLBxFzyca6mD"
-    "WYf8qd/KzIbPwXhMnZebbKEJXWJ5K3+q6sLzBpwLNLmwBT9JwlgF6FZ9NQBlCqZlaIlGxuU+iG6YLKAe4kq4jXWNApk+ONrj"
-    "HEKD1eTDw6mY4p7frjMWrd5SsqAPiIdIadIUawrn/4CdO3KVyuNcsDQ1HXUt/SOpJYqe+4NrM9nAujqgMe0gceivXSgOaQlR"
-    "0n+EGfg6hky9OIbBkQBaAMYE9O9aSQeyaCvyOUFoqXXQAH+xm/uQiwDhOoxTeQ9rtxLF2domDJ4gKxrsDuiQ7lEXlYNFtZhK"
-    "F/DBoUhVJ43la7ZbfalYQdwUzz0sVX+I/ZeYM6XWuSdHVNGTx7NnvZbdbbkMkST6FDmltsw4f34EOrqvqU1d02iHJQCxKCHn"
-    "OZW37vpvYG3CjxAWjcyo6LZxGQo2ji3Neg2m6CtQ7+v5zb65W7HtRwQxjtk5TO4ElwlFFIP4dujkiQHOx4v09CeagNQXWB2/"
-    "3DCrxdivfvPFP//69Zdf/TpGUyhs+KMrza6oR8snhGJc7Ma++ep3r/8ZS6wcE2JAB5mQok0C60ggU/f0jTsPgKFgDFPoa+FY"
-    "uEO7QbLEhzYeJDA6AcGFqkCcoHd2uIlQhQPVrXg06OF5BFDRfcvDo8OXPJz0IkzbwcRlbLX0Oq8PwDa51swVi9mShyPYyNJx"
-    "9OrNOXOpMD86BdeHuuEu/yjuHP1jN0xHv7VZ0KvVMbkMHj4os/rB7GKc2FBbd5AkBw8TtjVW1XEGPHEX4FSUqPvn6dl4ioWw"
-    "gGYz29jpn+IXoDPZLP6F1WMTckHRmR+dWip+OUaDe3f7UjU6xL3iLOSjYrd8VB8jH8M1HIZzCVgh4BUl5WZFn4XFDFT2rqya"
-    "XOXXKvM/zLGLJigEkMa4SlsmYlhOaIOBf9nVYTyu0xvMrxNKldVph8Rumy6R5zgJrzD15jyMfF29x696O53SxS4A7Z27NDOr"
-    "vkHKhDVZHimbMIg728oQjDosAQaPgtN7NXu/46jf6thxveFAa3sCTAWtOEZLhUJpBkWY47r8mpJVEcJbZ7A+ss/Wmen1cMhS"
-    "TUmz1AnHskd2zXpQmteYrpOTogZUm6adCc6SinXky6aUZg+Ii+kyyzKka8CAP2eSuhE9NT0a0pWwkgLJQ0pQvKBzRLLcTWNA"
-    "lIULpvu8MbzOM4JKxAuzflqp3BI8uLYchLswmvlBStOAEiZJ6Z3lkSXTthmWLXSQcIYN2B28jX+Z1/QrmXlYQ9Tt+VdTsDgm"
-    "IktpTd8HdemWkTKTq+Er/cnfB5cIrwfUNnCV6nUUCc96p2a0qvBETiy+MMINWNpSSaNmCxnNh4plHjoXKyyGkYx2XcAxZ67U"
-    "XTDswv6FjoZO9OUPY379VrcSWs0h1bV4LpnfSCKeKiT+FR0ksSNcCE1zwZxAEd10KLYXL38Ug8MWoDnEeag9+JXefGUYcqIw"
-    "YY5Qbq8dZnivsWtSeD1M6JuHu923+f4bz63+5Y9jUVuGePcFW9Q6o9CsiWD7dB8uiI1cvTYsDZRNUYp1AWXYOhPWEYjOhkl3"
-    "POUnMQJp+w34iRIr/SA8OWwyOSvMD644ZrJnJmktBWiVQJuwIurKpq3xtsz7l7HlgIdIB0HSY7cby4H3UiSLC5gLg2mYiMc9"
-    "tX2SpeIuHj3rX0BPdT5PnvFXMVci6U7A8Cgk5dmDFA+wesPruRXqZfvRzbacKrSPG0FnRwJXlnXvd8CwdK+ea4IxrYtZv6YP"
-    "++sYrVhgkJYrH1iUcvV0KdQpjGMXbhph3ulNWLGOsqtJk3qkwgJ1RZF07v8WY/9UvMz+j5WydDgcSMUgbvJZqEcGfwQTDvzq"
-    "BtASgAze4PIdspdFEU0TH3QbsmEGWZIBkQf99xiiephrML4FCdTinQpNr4NACydzRZ0Qz9hgR6B0J7KFyP4UMRAropMN00tD"
-    "hpmJ1rbgaszZjcfTDhJlln4rPdZGV5vzvaYXWeaPY9hfDEKVjra4VHQFTSsVwFBUMtJiJtdTulGUCQAE9DMc4w86+BDUmwo9"
-    "iN7sxgUbJ8akctBrU3uMEQQQKAwK+h3KAagDFVO2sFRWj+qGVEsc1PhU4SnKNNn4TtC7ikG1IdQYtwAbyGade1HV65/4tTyw"
-    "S3ywC9k1No/yP38ugl8E60sxugvQJdCKar7OeBQKaMlxtsKkU2Q7IT5oiEXDbBwS1CXc00dgIRrdKVsx2RpDBZCixjqiNfPc"
-    "NqOVCLewx+VplT+wFNUB0lxo4BxSnbS6T1q8lBiiaBVXYl+/ZtUjSjYyita7PS2hx17+lbusGkYQS99QAcsn7CrQzD69t7iu"
-    "ZdenDZdaVZuXE2BO8pH3vsMXG2tyyCwbSjZwgxVnzc6wF2Fl2eZMaguEI0wRujbbPPeNw6KaTh+VDgPRCfD5jN+cIqadHzxH"
-    "0lNGZBJV9m2yeLk2G3XFd9Ul83qoMSsf29acsHZMuGbe/KlkEh+IS6II7tchE948SQ0iJBjiGa4/uBiwUrPFEsYHl1sIukxx"
-    "f9Y7j9Kf+FU7gYjlq0UPCMfyc7sJjsE8Eobbo8lb3ELakaRjow352BaZIrhpaDY0q8RCrqHgF2VyNsYgzJAuFewU+hMFaN8V"
-    "uZIRofSVSMjECABTKaXtjgu/2m3aZEF8y9sHZRrXICrz+Apx6NydnKg6XT+kk9oiHT9Q0sCi60pfQhSyB1t58Jv35uIcNx+M"
-    "AaqcsNqMNgNGyRWAaCI2eWgihAimm54eoGbrQwr0tlocRqxGKE2OlBGRZeEEyiFNKctFh7Q2+BEupMFP4vWW7ZbZFijde8se"
-    "OmyUzWjZhqFT6kDTQVBvu9tlD1FnRLBI5LV4veggX1njn/KT/3Apm5jvTNlHBlIqZJBDRivqLVSBuDMwu1uo8T4QRpZ2xHwl"
-    "dGenaNdOhJC7HAQ5h+R0wc8dbQDVliWYSZxJuQ26BPYa/TDGnMVWjp//8r/KFxfqdyLLYApxPbWkn655xYzu1KEi5mZQOSpC"
-    "O2lRF1TRbE3zqnSG8PRrU+rMEv0TBWaNPmSAbCOZVDyJFPJFk71i+Ed10ZuIVBR1/hT7N91NLq+fUafE9tTjp7nwfvcMggaX"
-    "rK4Zq1E6xkUob9MoEw+XykPUkRCppCrruObwrJSGClBlZBosXxicjR8Fzx1PizkL0MYau0XBCzpB+KJFykYbDFkfd4UArCeZ"
-    "Jub0kvZc4kKILXWweFdAHVZ4JRSKUmT7BMlnHfMk5XEecYN54bd5tNAz50yiYIOwKiSdS3P1h5DYvc3HSC6UtIV0zZG7xCPz"
-    "ZO204/C6AmAOnD4wVDyUxhNOGlpQsVuNMO2n9EOPUGObpXjmWjNUPGOJXlgkKnbUbtWdsmsV7oodkUseSrpDmDV1YZlO/F2U"
-    "FOdIJBVMbLiFSpJCO19ozoltjZwF1B7szoH7LHzUZJtaIhdtXgoPeGphbODOLiKM8FCukad+Y5LJqNPXMz2cUgU34W6NtB3K"
-    "JZ9m44OQy0on7GPXvWcCdSqeafORUkgBZJYAgvYVsNYZqYYNEceUlxwWOYvhgec382bSxmhR+Q2PbQbyTsCy6Wv9lHofX7WX"
-    "Y4T88tHcrTDVuFdj82snzNoSRC40UwegZGkVjkt7jmj9mdCxHs63MiCQzNdmm5ragT25SSSm1QS4RlLaUEQQrz3jRsbrAvqL"
-    "fJnks6QTtxfVJD11uGxOZIig1IDfNBsERY1qLzBFOCfH0af7zJtvX9M5xtm/ja9cxHibdXMgH6Lz0lL6nnyH3EOnZceeZOM0"
-    "PRKKjaKQlir1Xsyhr925NovnjvT29jWLw15yRDPtuj05B81iRkc26/qphmO3d1kOxTI4CbuQe3Mpqan8NVkiFH3x9Z3ciUK/"
-    "67sSMLEPwyhvSMYq0BGFntqXziTxEl11wegLXYtSPrg55yITh+4VBgguPO0wL7E4t///oUV1FzVCBRWTPgRZjeJDu3pvW9ca"
-    "mZIzLqEfoqC3+JYUlNVOpHk/zUROmNEXUbnj0tzLIMX2AnGEABOp8i6yMZrI0JeLPMUOOsPxrc3u0w/hKa2yF9bzc6rf8trW"
-    "mTsMsQoH03CN4HLDJ7LWzTEPQ8BJxRmtMXIxTHhIbOKIbv+Na8ghSLx1bK56FOYY38E5rWqoBUYpRPc2grhCdRv+AVtuo5CL"
-    "uYT8qTITDTvULnSdmmfT1gaO3HEddEralTRptkLTsTpr9s7Gm1GHveQgdxnLiWsOT1rjen2k6H5TXziIdsLzv61HGTYnRLCi"
-    "pdyMrsC5UKFtbwGf1LidtcHzAiNKKQCzhBKq5hJoblLUhaH6YEpAGsZt5kZpNr2d9LDanQeSJuGn0vFRcFLqXWvHB39tlZzd"
-    "TIjIYiWHrrgQpdHSmy6DFmXUzCQ9T+zZ1MRbxHb4KNlccAVAUHCw6blJZmQgYbZbn8k8PVRG1ETJgxeRTPqQ9r0TLU0dEHOk"
-    "OeRFDmZ5Jna5PL+hmM7H0cuNjnS5JEnCryb8nXNtm9FGSb49BUukl1+9D+7q0kLuikCVtxslXK4M9NFv8Mz1XR+NOKStjzmm"
-    "8KtkHmo8MUWP+rmn8MM3NuDzPI0Btd1fCaC30Jclmu96y3X4rDeExi/fXFL5vpMiNMWLyL7DPvPxLd9WiwjS8BmHFFvOc76j"
-    "KBrCuCKYND6rDmue09lYL6v2vwxyWtrkvgGWUqODQ+r2gmlVetRLURcvD0ReH4hE6vqtJLcQfdXOOH+0q+fm2p3Dnm8lGo7k"
-    "sIJf6zMFLz0xrgfdYxbnYmX5WTYTB8PCL7kMIlcdre/XyjX3SGDvOmHRc/Tl8GFefaPvCWjM6u/taCGOLL2bjhL83Hw3zTJC"
-    "tMwkqQvsUsMwRSLpLtSchkMxqXEyWdN2qgAIF9vmSK3WSjmkErnZ8NVUV0k023kzKGvOAPZEQtfUiE97Ml1h4nxP0+0kcZ2i"
-    "YjvDGkFLClOZPUQYomF0RV+iDesUCacgnX5E9BVJuWrJgkkiP8sYDni6zpMN658aaPobt/7NhtbhXSOLtJsshx9ho96lzUwd"
-    "JIQdH/ysheDvLPndd9Yk7tJ9L6dkxEq+m5KJ0jBhAqYSjmkFzfh/OmYjxdChW7Stc5AzHaMiZjYNZHtR3dFTcwUe09jFeLYd"
-    "jIpYWqdP70YiyxeGbHGLjchp1gGFAR/ORhfQvwh8GEoerUZf3XsZ4Yt82lUevtXEF0jncSbovVd//MM3r//pbzz7lLYJeWNh"
-    "cEOqd5HyK7tMCjNvD3JwUsIfPXhN8ya0wMY2c/fOuowNM1Z5T92mqzbzBlBSf/hgsjfQw+j9DlDdu2NJ3xKvZGeMLvETS3vq"
-    "549WoTXuFStAY3rfHXoxP79y/iF05gtlIFkQYFKTZE1vaWeODC+ZnMvXiOJFtywfkqYi4VRpxfEtWCAOKXxZQbSCXCTiHEzs"
-    "ZivqlXGH6rV4X8ffOI2YR0gV9L08hmL6BmNUqZH0j3ufLnpRGiEEW7rj8tLf5Ch45P8y8OLHP+Bb/EHaNYa7t+PGVXzlzz/5"
-    "QUxDD83fwn0InIavEkdd0y9EX92WFBVYI73fURof+0lMdVCHaceY5kTCN1/e1m9JMvrnTUAzcxsnVxBd1Bdbv7GtYVTeAbXn"
-    "/2KAY9T32tobCA5j//LNF1//+vU3/xr7l//7+mv8zf6nf2WiXvrHnEvHRthmI4Vh8f8HWDEZBqIqhEvdOzbqsBOFkcEijMKw"
-    "1tD0n5hzcH16TNWXrxgYl5vyeqx7z5+GvZ2AWvIV2qPziHlhvCMfIfMVqqcvzTNj4HIVchd14mBNcxXEzvudqM9FCKXrp/Kv"
-    "Bn5L6yls9JJ3WDWfzheJii3XPzc80MzQ0vklFOEWfYNvF/Ci/EjYCHO99IqqSazrtyihJC1ih/SVURcPTDu1CMRYPx5oW3/w"
-    "fA8XxaBF3qXVcohrA8pnXbgi/6XCvNwGyVJyBu/cYOfXzrmnfTfRkrQfTBemBxC/jDSFbf/6f1/QIFbc/xghysDTl5cgdLv6"
-    "k6eZDWA+5vSiy9qHiqhf7QCYwAUv3rBfAfDxOfFRWHi59k94iLa2HrS7WsbWAfIWVF6GHUrr4KLVjeUNaW7lLjztrrKZM+i2"
-    "hmfL/xkENpttus4xKNZG3kxv9B1Q9x9HaLiiAzJ5KuvOgSYpTAMXx1GB+7t9aNqoFnajsbeNVR5Me1Rka6O864El/AcdfMzd"
+    "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"
 ))
 
 
 OVERLAY = OVERLAY = _crlf(_unpack(
-    "eNpdkttyokAQhu99CovcW7XH50MNAq4IsUTFU0QxWonxtCQih/JhMt0zXOUVtkeqspu9ZJr+/r//7pubMroGNEelEo43ollj"
-    "URufF9jTwWnBYcoilSVZXl/z7IjdC3/uvactFlk42LEooBKLO3wU8acpi00+vMWWzpLgTa2VSl8qZUISCf0FUXl3jcapqEPj"
-    "yB+r2H+VsGT5b4lFMegNCfj6qd+C0UxkW9z4MJ9Cc/amVsVuks8HYA/QtfH2nl5Y1CTD9JuYP4lLlve3Qm1h95WHK0n89pmY"
-    "j1XxUAXnrtCHwBKXPVEgda8vPZzp+HuNkyXGjuz/XimDHvP2XhEXjxIA5wEcI1drikIgIkpcc0YWwF6i7eSNjqLwxGPRo8go"
-    "L5XXzpQRNw2yIRn8kMDlBYKQciCesEy+vvA0zr3TR8xiv0at/Z4OwZhh28xrC4JTFUZTMPZoroTfElsfjA62l3yiQsOTXn/8"
-    "l17qgrbkmw2LTLnlZAlBj7ywJGGZi786PJlwp8G7B2oG3SfhIh4WhbQn7O0pdpoAJ/7V+MrCugaNF3a+l3P7LYVgMI4pD/KW"
-    "1zOxC3HQBiOA7RBOR57Y4nQHVfvDOQ1CF0S8XLckfnfm2nVLPytlKbTxC1fXtcpAQbNEuCg+cfsiBVyvEOPbvrxeOg9Xy4dj"
-    "CotFc0jr6IYkIPUCi2QomiLWvzu3Pdo5DUQrKnrJwR97Vxlw"
+    "eNpdkttyokAQhu99CovcW7XH50ONAi6nWOJZI4rRSoynxYgg5cM43TNc5RW2R6qym71kmv7+v//uu7siejo0BoUCDleiUWGR"
+    "ja8zbGvgmrAbs0hlSZpVlzzdY+vCX9vvZ5NFFnY3LAqoxOImH0T8Zcxig/fv0dRYElzVSqHwpVQkJJHQnxGVt5aoH/M61Pf8"
+    "uYydNwlL5v+WWBSDVpeAr5/6LRhMRLrGlQ/TMTQmV7UsNqNs2gWni56D94/0wqIGGabfxPRFXNKssxaqia03Hi4k8dtnYjZU"
+    "xVMZ3IdcHwJLXLZEgbN3e2njRMPfSxzNMXZl//dSEbSY21tFXHqUALhP4OqZWlEUAhFR4hoTsgDOHB03qzcVhSc9Fj2LlPJS"
+    "eeVEGXFDJxuSwXcJXA4QhJQD8YRl8OWFn+Osd/yIWWyXWLPfz33QJ2gbWWVGcKrCYAz6Fo2F8E2x9kFvoj3nIxXqPen1x3/p"
+    "nT2ozflqxSJDbjmZQ9AmLyxJWOrhryZPRtyt89aOmkHzSTiPh0Uh7QnbW4qdJsCRfzO+sLBag/qBnR7l3L6pEAyGMeVB3rJq"
+    "KjYhdm3QA1j34bjniSOOD1B2PpzTIHRBxMs0S+I3J167belnqSiFVn7u6rZWGSjULBHO8k9cH6SA18vF+Lojr5fOw6tl/SGF"
+    "xaIpnKvohSQg9QKLZCiaPNa/O3d6tHMaiFaU917Vyh97Vxlw"
 ))
 
 HARDENING = HARDENING = _crlf(_unpack(
-    "eNpNkdFOwkAQRd/9CoLP/mOL0tJSKApFoMWIFKgRlqpEoaX6MezMbJ/4BWdTY0z2YTJ39t45u5eXNUreQUzQWOF0huuvi4ur"
-    "mty7OLTRMTByqi5ECUZreZyo7RSaCSVtLQWt89GT+w6Ej7A9aMkflcG3Mjw1S8H2T0aD3UrThlbKYzQTOmm0hd5SfbgUeDS5"
-    "AasJ4sA+6Dl1jlHeNYQ77tYhvqGexQrlK8o3MotlPqosVXsBTkfuDVUICB9oMwA7o24qMwvbd5RPT4aptjsMxtgaQrOjdnOY"
-    "pzjq6pxozbco3GF3wYemBpiTikOt5qXt8l2uS7OPG+e3tjs4THl9JeJqAT28NNF16yAcfpA6FH1ZRBSZFCwot5TbYDZenwav"
-    "52NYdSB9ZfiKg5xnvUj28t+P8f9U5oNeF9xHmeeyCKB4gqPPnuj3KM4032YJt67myzMlhE4ZJNj6xLdZeS948vdvrDFH/AD6"
-    "U0uS"
+    "eNpNkd1OwkAQhe95CoPXvmOL0tJSaFWKSFsj8lcjLEWJYkv1YdiZ2V7xCs6mxpjsxWTO7Dnz7Z6fn1H6BmKMxhKTCa6+Go2L"
+    "M7l3cWijY2Ds1F2IU4xX8jBWmwTaKaVdLYWd08GT+x5Ej7D51JI/qsJvZXhqkoHtH40Wu1WmDZ2Mx2gidNJoA8FCvbsUejS+"
+    "AqsN4pN90HOaHKO8S4h23G3C7IoCixUqllSsZT6Txai2VN05OD25N1QpIHqg9QDsnPqZzC3s3lCRHA1TbXYY3mNnCO2e2k1h"
+    "muGor3PiFd+iaIf9OR9KDDDHNYdaTivb5btcV+Ytrp3f2u7hMOP1lZjVC+jhhYmu2wTh8IM0obyVZUyxSeGcCku5LWbj9Wmw"
+    "PR2iugPZluFrDnKe9SL5y38/xv9TmQ+CPriPsihkGUL5BAefPdEPaJZrvvUCrl3NV+RKCJ0ySLHzga+T6k7w5O/fWPdHo/UD"
+    "+lNLkg=="
 ))
 
 ADDENDA = ADDENDA = json.loads(_unpack(
-    "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"
+    "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"
 ))
 
 ECHO_WORD = "\u7834\u7532\u81ea\u68c0"
@@ -3763,16 +3775,42 @@ def find_one(text, begin, end):
     return got[0] if got else None
 
 
+# 社区版（pojia-ce / pojia-yijiantong）在同一批文件上留过自己的块。它跟我们的标记
+# 不是一个字符串，find_blocks 找不到，于是上一条链留下的整块正文会一直压在下面：
+# 两份并存时模型可能挑到旧的那条，回的还是上一代口令。
+LEGACY_BLOCKS = (
+    ("<!-- POJIA-NEXT-INJECT:BEGIN -->", "<!-- POJIA-NEXT-INJECT:END -->"),
+    ("<!-- POJIA-CE-MIRROR:BEGIN -->", "<!-- POJIA-CE-MIRROR:END -->"),
+)
+
+
+def strip_legacy_blocks(text):
+    """摘掉同系列旧版本留下的整块（标记行到末标记行，连同行尾与其后空行）。"""
+    if not text:
+        return text
+    for begin, end in LEGACY_BLOCKS:
+        while True:
+            got = find_blocks(text, begin, end)
+            if not got:
+                break
+            start, stop = got[0]
+            while stop < len(text) and text[stop] in "\r\n":
+                stop += 1
+            text = text[:start] + text[stop:]
+    # 社区版在块外还留过一段不带头尾标记的行：单独抹一次，否则拼在文件开头
+    return text.replace("<!-- " + MARK + ":BEGIN -->\n", "", 1) if text.startswith(
+        "<!-- " + MARK + ":BEGIN -->\n<!-- pjm:h=") else text
+
+
 def strip_blocks(text):
     """删掉所有本工具的块（主块 + 镜像块）。同一文件有多个块时全删（历史遗留）。"""
     if not text:
         return text
     spans = find_blocks(text) + find_blocks(text, MIRROR_BEGIN, MIRROR_END)
-    if not spans:
-        return text
-    for start, end in sorted(spans, reverse=True):
-        text = text[:start] + text[end:]
-    return text
+    if spans:
+        for start, end in sorted(spans, reverse=True):
+            text = text[:start] + text[end:]
+    return strip_legacy_blocks(text)
 
 
 # 块外的旧自证小节：上一代工具（8.65 / pojia-ce）往同一批模板里写过一份
@@ -4623,7 +4661,7 @@ class Target(object):
                 say("[预演] %s：会还原 %s" % (self.name, path))
                 continue
             try:
-                if revert_one(self, path, kinds.get(path, self.mode), norm(path) in created):
+                if revert_one(self, path, kinds.get(path, self.mode), norm(path) in created, root):
                     done += 1
                 else:
                     problems.append(path)
@@ -4747,7 +4785,7 @@ def apply_one(ctx, tgt, root, path, kind, payload, force):
     if kind == "block":
         # 块外的旧自证段先清掉；有这个残留时即使哈希一致也要重写一遍，
         # 否则老机器永远洗不掉上一代口令（状态判成「已是最新」直接跳过了）。
-        cleaned = strip_orphan_echo(text)
+        cleaned = strip_orphan_echo(strip_legacy_blocks(text))
         orphan = cleaned != text
         state = detect_state(text, ctx.hash)
         if state == "current" and not force and not orphan:
@@ -4762,14 +4800,34 @@ def apply_one(ctx, tgt, root, path, kind, payload, force):
             return (True, True, "预演")
         if not _prepare(path, tgt, root, existed):
             return (False, False, "备份或建目录失败")
-        new = put_blocks(cleaned, payload or build_block(ctx, tgt.key),
-                         build_mirror(ctx, tgt.key))
+        putter = getattr(tgt, "put_blocks", None) or put_blocks
+        new = putter(cleaned, payload or build_block(ctx, tgt.key),
+                     build_mirror(ctx, tgt.key))
         if not write_bytes_checked(path, encode_text(new, bom, eol)):
             restore_backup(path, tgt.bak_suffix)
             return (False, False, "写入失败或回读不一致，已回滚")
         msg = "已写 %d 字符" % len(new)
         if orphan:
             msg += "，并清掉块外的旧自证段"
+        extra = getattr(tgt, "extra_writes", None)
+        if extra:
+            for epath, ekind, epayload in extra(ctx, root):
+                etext, ebom, eeol = read_or_default(epath)
+                if etext is None:
+                    continue
+                if not _prepare(epath, tgt, root, os.path.exists(long_path(epath))):
+                    continue
+                etext = strip_orphan_echo(etext)
+                keep = QoderCnTarget.split_frontmatter(etext.rstrip("\r\n"))
+                ehead, ebody = keep if keep else (QoderCnTarget.FRONTMATTER, etext)
+                if "name: qodercn" in ehead:
+                    ehead = QoderCnTarget.FRONTMATTER.replace(
+                        "name: qodercn", "name: purge")
+                ebody = strip_blocks(ebody).strip("\r\n")
+                enew = put_blocks(ebody, epayload or build_block(ctx, tgt.key),
+                                  build_mirror(ctx, tgt.key))
+                enew = ehead.rstrip("\n") + "\n\n" + enew
+                _enew_ok = write_bytes_checked(epath, encode_text(enew, ebom, eeol))
         return (True, True, msg)
 
     if kind == "whole":
@@ -4953,8 +5011,21 @@ def _kind_tag(kind, payload):
     return kind
 
 
-def revert_one(tgt, path, kind_tag, was_created):
+def revert_one(tgt, path, kind_tag, was_created, root=None):
     kind, _sep, key = str(kind_tag).partition(":")
+    # 第二落点先清，放在一切早退之前：主文件有干净备份时本函数会在下一行直接返回，
+    # 之前把这段放在 block 分支里，技能包永远不会被删掉。
+    extra = getattr(tgt, "extra_reverts", None)
+    if extra:
+        # 第二落点相对配置根定位（agents/purge/x.md -> skills/purge/SKILL.md）；
+        # 调用方传了 root 就直接用，否则按主文件上溯两级猜。
+        base = root or os.path.dirname(os.path.dirname(path))
+        for epath in extra(base):
+            if os.path.exists(long_path(epath)):
+                try:
+                    os.remove(long_path(epath))
+                except OSError:
+                    pass
     if backup_is_clean(path, tgt.bak_suffix):
         return restore_backup(path, tgt.bak_suffix)
     vroot = tgt.vault_root()
@@ -4969,7 +5040,8 @@ def revert_one(tgt, path, kind_tag, was_created):
         new = undo_layers(text, path.lower().endswith(".json"))
     elif kind == "block":
         # 模板文件可能同时挨过五层开关，先摘开关再摘块，顺序反了会留下半句
-        new = strip_blocks(undo_layers(text, path.lower().endswith(".json")))
+        stripper = getattr(tgt, "strip_blocks", None) or strip_blocks
+        new = stripper(undo_layers(text, path.lower().endswith(".json")))
     elif kind == "whole":
         new = ""
     elif kind == "json":
@@ -6090,6 +6162,117 @@ def _mk(cls, **kw):
     return obj
 
 
+class ReasonixTarget(BlockTarget):
+    """Reasonix Studio: config root is in AppData/Roaming, not ~/.reasonix.
+
+    ~/.reasonix only holds locks/, so writing AGENTS.md there is a black hole.
+    The AutoAppData path goes into envs because envs precede default_root in
+    the resolve chain and an unset placeholder simply becomes an empty string.
+    """
+    key = "reasonix"
+    name = "Reasonix"
+    rel_dir = os.path.join("AppData", "Roaming", "reasonix")
+    envs = ("REASONIX_HOME", "REASONIX_STATE_HOME",
+            os.path.join(appdata(), "reasonix") if IS_WIN else "")
+    procs = ("Reasonix Studio.exe", "reasonix", "reasonix-studio-host.exe")
+    exe = "Reasonix Studio.exe"
+    dir_flag = "--reasonix-dir"
+    markers = ("AGENTS.md", "config.toml", "sessions")
+    instr = "AGENTS.md"
+
+    def is_valid(self, root):
+        if not root or not os.path.isdir(long_path(root)):
+            return False
+        return any(os.path.exists(long_path(os.path.join(root, m))) for m in self.markers)
+
+
+class TraeCnTarget(BlockTarget):
+    key = "traecn"
+    name = "Trae CN"
+    rel_dir = ".trae-cn"
+    envs = ("TRAE_CN_HOME",)
+    procs = ("Trae CN.exe", "TraeCode CN.exe", "trae-cn.exe")
+    exe = "Trae CN.exe"
+    dir_flag = "--traecn-dir"
+    markers = ("rules", "user_rules", "settings.json")
+    instr = os.path.join("rules", "project_rules.md")
+
+
+class QoderCnTarget(BlockTarget):
+    """Qoder CN: agent files need a YAML frontmatter first, so the block goes after it.
+
+    A second landing point (skills/purge/SKILL.md) is written the same way; on
+    revert it is only removed when the file really says name: purge.
+    """
+    key = "qodercn"
+    name = "Qoder CN"
+    rel_dir = ".qoder-cn"
+    envs = ("QODER_CONFIG_DIR", "QODER_HOME")
+    procs = ("Qoder.exe", "Qoder CN.exe", "qoder")
+    exe = "Qoder.exe"
+    dir_flag = "--qodercn-dir"
+    markers = ("agents", "skills", "settings.json")
+    instr = os.path.join("agents", "purge", "qodercn.md")
+
+    FRONTMATTER = ("---\n"
+                   "name: qodercn\n"
+                   "description: 破甲工作契约 agent（由 POJIA 写入，--revert 可还原）\n"
+                   "permissionMode: auto\n"
+                   "mcpServers: []\n"
+                   "---")
+
+    @staticmethod
+    def split_frontmatter(text):
+        t = (text or "").lstrip("\ufeff")
+        if not t.startswith("---"):
+            return None
+        head, sep, body = t.partition("\n")
+        if not sep:
+            return None
+        i = body.find("\n---")
+        if i < 0:
+            return None
+        return (head + "\n" + body[:i + 4]), body[i + 4:]
+
+    def skill_path(self, root):
+        return os.path.join(root, "skills", "purge", "SKILL.md")
+
+    def plan(self, ctx, root):
+        return [(self.main_path(root), "block", None)]
+
+    def extra_writes(self, ctx, root):
+        """技能包是第二落点：主文件之外再写一份，失败不影响主文件。"""
+        return [(self.skill_path(root), "block", None)]
+
+    def put_blocks(self, text, main_block, mirror_block, path=None):
+        # 无头文件（首次写入）在正文前面凭空多出一串空行，会让二次 apply 与首次不一致；
+        # 统一在切头之前把两侧换行清掉。
+        t = (text or "").strip("\r\n")
+        fm = self.split_frontmatter(t)
+        head, body = fm if fm else (None, t)
+        if head and "name: qodercn" not in head:
+            # 技能包：只要头部，块直接接在 frontmatter 后面
+            return head.rstrip("\n") + "\n\n" + put_blocks(body.strip("\r\n"),
+                                                            main_block, mirror_block)
+        merged = put_blocks(body.strip("\r\n"), main_block, mirror_block)
+        if not head:
+            return self.FRONTMATTER.rstrip("\n") + "\n\n" + merged
+        if "name: qodercn" not in head:
+            head = self.FRONTMATTER
+        return head.rstrip("\n") + "\n\n" + merged
+
+    def strip_blocks(self, text):
+        new = strip_blocks(text)
+        fm = self.split_frontmatter(new or "")
+        if fm and "name: qodercn" in fm[0]:
+            return ""
+        return new
+
+    def extra_reverts(self, root):
+        """技能包是本工具新建的整份文件，撤回时整份删掉，不留空壳。"""
+        return (self.skill_path(root),)
+
+
 TARGETS = [
     DshTarget(),
     _mk(WorkBuddyCnTarget, key="wb", name="WorkBuddy", rel_dir=".workbuddy",
@@ -6135,6 +6318,9 @@ TARGETS = [
         envs=("KIRO_HOME",), procs=("Kiro",), exe="Kiro.exe",
         dir_flag="--kiro-dir", markers=("steering",),
         instr=os.path.join("steering", "pojia-inject.md")),
+    ReasonixTarget(),
+    TraeCnTarget(),
+    QoderCnTarget(),
 ]
 
 TARGET_MAP = dict((t.key, t) for t in TARGETS)
@@ -6276,6 +6462,42 @@ def check_target(t, ctx, root, src):
         fused = os.path.join(root, "resources", "fuses.json")
         if os.path.isfile(long_path(fused)):
             add("info", "检测到 fuses.json（Electron 保险丝）", "")
+
+    if t.key == "reasonix":
+        rules = os.path.join(root, "rules")
+        add("ok" if os.path.isdir(long_path(rules)) else "info",
+            "rules 目录：%s" % ("在" if os.path.isdir(long_path(rules)) else "没有（本工具不需要它）"), "")
+        cfg = read_strict(os.path.join(root, "config.toml")) or ""
+        if "system_prompt" in cfg:
+            add("info", "config.toml 里另配了 system_prompt，那条通道与本工具并行生效", "")
+
+    if t.key == "traecn":
+        ur = os.path.join(root, "user_rules")
+        extra = []
+        if os.path.isdir(long_path(ur)):
+            for name in sorted(os.listdir(ur)):
+                if name.lower().endswith(".md"):
+                    extra.append(name)
+        add("ok" if extra else "info",
+            "user_rules 下另有 %d 份规则同时在生效" % len(extra), "、".join(extra[:4]))
+        if os.path.isdir(long_path(os.path.join(home(), ".trae"))):
+            add("info", "国际版 .trae 也在，本工具有独立的 trae 目标", "")
+
+    if t.key == "qodercn":
+        adir = os.path.join(root, "agents")
+        others = []
+        if os.path.isdir(long_path(adir)):
+            for name in sorted(os.listdir(adir)):
+                if name.lower().endswith(".md") and name != "qodercn.md":
+                    others.append(name)
+        add("ok" if others else "info",
+            "agents 下另有 %d 个 agent 文件" % len(others), "、".join(others[:4]))
+        sk = t.skill_path(root) if hasattr(t, "skill_path") else ""
+        if sk:
+            add("ok" if os.path.exists(long_path(sk)) else "info",
+                "skill 层：%s" % ("在位" if os.path.exists(long_path(sk)) else "未写入"), "")
+        mem = os.path.join(root, "memory", "MEMORY.md")
+        add("info", "memory/MEMORY.md %s（本工具不改）" % ("在" if os.path.exists(long_path(mem)) else "没有"), "")
 
     if t.key == "zcode":
         cjs = t.find_cjs(root)
@@ -7995,6 +8217,10 @@ def collect_explicit(o):
         ("cline", getattr(o, "cline_dir", "")),
         ("copilot", getattr(o, "copilot_dir", "")),
         ("kiro", getattr(o, "kiro_dir", "")),
+        ("reasonix", getattr(o, "reasonix_dir", "")),
+        ("traecn", getattr(o, "traecn_dir", "")),
+        ("qodercn", getattr(o, "qodercn_dir", "")),
+        ("qodercn.skill", getattr(o, "qodercn_dir", "")),
         ("wb.install", getattr(o, "wb_install", "")),
         ("wb.data", getattr(o, "wb_data", "")),
         ("wbintl.install", getattr(o, "wbintl_install", "")),
@@ -8070,6 +8296,9 @@ def build_parser():
     a("--cline-dir", dest="cline_dir", help="Cline 规则目录")
     a("--copilot-dir", dest="copilot_dir", help="Copilot CLI 配置根")
     a("--kiro-dir", dest="kiro_dir", help="Kiro 配置根")
+    a("--reasonix-dir", dest="reasonix_dir", help="Reasonix Studio 配置根")
+    a("--traecn-dir", dest="traecn_dir", help="Trae CN 配置根")
+    a("--qodercn-dir", dest="qodercn_dir", help="Qoder CN 配置根")
 
     a("--dry-run", action="store_true", help="预演，不落盘")
     a("--force", action="store_true", help="已注入的也强制重写")
