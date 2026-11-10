@@ -95,6 +95,25 @@ for line in lines:
 print("BATCH-END")
 '''
 
+# 绿色版：没有安装器可借，走 move 换文件那一支
+GREEN_SNIPPET = r'''
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.abspath(sys.argv[1])))
+import pojia
+pojia.FROZEN = True
+pojia.SELF_EXE = r"C:\Users\t\pojia-modifier.exe"
+pojia.install_meta = lambda: {}
+pojia.setup_install_dir = lambda: ""
+lines = []
+pojia._swap_script = lambda ls, name: (lines.extend(ls), r"C:\temp\_x.bat")[1]
+pojia._run_detached = lambda argv: True
+pojia.update_install(r"C:\Users\t\state\_update_pojia-modifier-windows-x64.exe")
+print("BATCH-BEGIN")
+for line in lines:
+    print(line)
+print("BATCH-END")
+'''
+
 
 def _batch_lines(box):
     p = subprocess.run(
@@ -108,13 +127,47 @@ def _batch_lines(box):
     return [ln for ln in body.strip().splitlines() if ln.strip()]
 
 
+def _green_lines(box):
+    p = subprocess.run(
+        [sys.executable, "-c", GREEN_SNIPPET, box.prog],
+        cwd=box.root, env=box.env(),
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120,
+    )
+    text = box.out(p)
+    assert "BATCH-BEGIN" in text, text
+    body = text.split("BATCH-BEGIN", 1)[1].split("BATCH-END", 1)[0]
+    return [ln for ln in body.strip().splitlines() if ln.strip()]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="换装批处理只有 Windows 上有")
+def test_green_batch_has_no_pipe_either(box):
+    """绿色版那一支同样不许有管道；move 重试靠 for 循环，不靠查进程。"""
+    lines = _green_lines(box)
+    joined = "\n".join(lines)
+    assert "tasklist" not in joined, joined
+    assert "findstr" not in joined, joined
+    assert "|" not in joined, "绿色版换装批处理里不该有管道：%s" % joined
+    assert any("move /y" in ln for ln in lines), joined
+    assert ":swapped" in joined, joined
+    for ln in [x for x in lines if "ping" in x]:
+        assert "%SystemRoot%\\System32\\ping.exe" in ln, ln
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="换装批处理只有 Windows 上有")
 def test_swap_batch_calls_system_tools_by_full_path(box):
-    """PATH 里只要有个同名程序，裸写 find/tasklist 就不是系统那个了。"""
+    """PATH 里只要有个同名程序，裸写 taskkill/ping 就不是系统那个了。
+
+    另一条更要紧：批处理里**不许**再出现 tasklist / findstr。这一对组成的
+    管道在 DETACHED 环境下会死锁（conhost 按住写端，findstr 等不到 EOF），
+    1.03.7 及以前就卡在这儿。谁想加回去，先过这条断言。
+    """
     lines = _batch_lines(box)
     joined = "\n".join(lines)
     assert not re.search(r"(^|[|&]\s*)find(\.exe)?\s", joined), joined
-    for tool in ("tasklist", "findstr", "taskkill", "ping"):
+    assert "tasklist" not in joined, joined
+    assert "findstr" not in joined, joined
+    assert "|" not in joined, "换装批处理里不该有任何管道：%s" % joined
+    for tool in ("taskkill", "ping"):
         uses = [ln for ln in lines if tool in ln]
         assert uses, "批处理里没用到 %s？" % tool
         for ln in uses:
@@ -126,9 +179,14 @@ def test_swap_batch_calls_system_tools_by_full_path(box):
 
 @pytest.mark.skipif(sys.platform != "win32", reason="换装批处理只有 Windows 上有")
 def test_swap_batch_wait_loop_terminates(box, tmp_path):
-    """把 :swap 换成 echo 跑真循环：进程不在时几秒内必须走到 swap。"""
+    """把 :swap 换成 echo 跑一遍：几秒内必须走到 swap，且中途不能卡。
+
+    taskkill 那行要屏蔽掉：这段代码跑在测试机上，机器上很可能正开着 GUI，
+    照原样执行会把用户的窗口杀掉。
+    """
     lines = _batch_lines(box)
-    head = lines[:lines.index(":swap")]
+    head = ["rem taskkill skipped in test" if "taskkill" in ln else ln
+            for ln in lines[:lines.index(":swap")]]
     bat = tmp_path / "_wait.bat"
     bat.write_text("\r\n".join(head + [":swap", "echo SWAP-REACHED"]) + "\r\n",
                    encoding="mbcs")

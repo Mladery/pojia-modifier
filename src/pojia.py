@@ -43,8 +43,8 @@ import zlib
 # 0. 常量与运行时开关
 # ---------------------------------------------------------------------------
 
-VERSION = "1.03.7"              # 护照里只存这个，纯数字
-DISPLAY_VERSION = "1.03.7-beta"  # 界面上给人看的：跟 Release tag 一致
+VERSION = "1.03.8"              # 护照里只存这个，纯数字
+DISPLAY_VERSION = "1.03.8-beta"  # 界面上给人看的：跟 Release tag 一致
 APP = "POJIA"                   # 护照里的 tool 字段，磁盘契约，别改
 DISPLAY_NAME = "破甲修改器"      # 只用于对外文案
 
@@ -8492,20 +8492,18 @@ def update_install(new_path):
             # PATH 先钉回系统目录，后面每条命令再带全路径 —— 两道保险，少一道
             # 都可能又走到别的 find.exe 上去（原因见 WIN_SYS32 上面的注释）。
             f'set "PATH={WIN_SYS32};%SystemRoot%;%PATH%"',
-            # 先给主进程一点时间自己退，退不掉就杀掉 —— 升级这条路上不能等它
-            # 自己愿意。等到第 15 次（约 15 秒）还没走，直接 taskkill。
-            f'"{WIN_SYS32}\\ping.exe" -n 3 127.0.0.1 >nul',
-            "set /a n=0",
-            ":wait",
-            # /nh 去掉表头，再用 findstr /c: 做**字面**匹配：find 的 "x" 里那个点
-            # 是通配符，碰上 _update_pojia-modifier-..._setup.exe 这种名字会误判。
-            f'"{WIN_SYS32}\\tasklist.exe" /nh /fi "imagename eq {exe}" 2>nul | '
-            f'"{WIN_SYS32}\\findstr.exe" /i /c:"{exe}" >nul',
-            "if errorlevel 1 goto swap",
-            "set /a n+=1",
-            f'if %n% GEQ 15 "{WIN_SYS32}\\taskkill.exe" /f /im "{exe}" >nul 2>&1',
+            # 这里不查进程，只等一个固定时长。1.03.7 及以前用的是
+            #   tasklist /fi "..." | findstr /i /c:"..."
+            # 轮询，DETACHED 起的批处理没有 console，tasklist 这类 console
+            # 程序会拉起自己的 conhost，而 conhost 会把管道写端继承下来按着
+            # 不放 —— tasklist 退了，findstr 仍在等一个永远不会关闭的 stdin。
+            # 实际表现就是一个卡死的命令行窗口，杀掉它安装才开始。
+            # 现在整条链没有一个管道：GUI 页面 1.5 秒后自己退出，这里等 7 秒
+            # 足够它走完；没走就强杀。taskkill 对不存在的进程报 128 就完了，
+            # 不需要看任何输出。
+            f'"{WIN_SYS32}\\ping.exe" -n 8 127.0.0.1 >nul',
+            f'"{WIN_SYS32}\\taskkill.exe" /f /im "{exe}" >nul 2>&1',
             f'"{WIN_SYS32}\\ping.exe" -n 2 127.0.0.1 >nul',
-            "goto wait",
             ":swap",
             # /POJIA_SELFDEL：告诉安装程序「装完把自己删掉」。只有这条路由我们
             # 拉起来，别的 /S 不该被顺手删掉人家的文件。
@@ -8518,22 +8516,24 @@ def update_install(new_path):
         return True, "已安排升级：程序会自己退出，装完自动打开"
     if IS_WIN:
         # 绿色版没有安装器可借，只能等这个 exe 松手再把新文件挪过去。
-        # 等的上限跟安装器那条一样：15 秒还不退就杀掉，别让人对着黑窗口干等。
+        # 等待方式与安装器那条一致：固定等 7 秒 + 强杀，不查进程（原因见上）。
         # 换完把 .old 删掉 —— 那是上一版，留着就是一个没人会用的同名文件。
         setup_exe = str(new_path).replace("/", "\\")
         bat = _swap_script([
             "@echo off",
             f'set "PATH={WIN_SYS32};%SystemRoot%;%PATH%"',
-            f'"{WIN_SYS32}\\ping.exe" -n 3 127.0.0.1 >nul',
-            "set /a n=0",
-            ":wait",
-            f'move /y "{me}" "{me}.old" >nul 2>&1',
-            "if not errorlevel 1 goto swap",
-            "set /a n+=1",
-            f'if %n% GEQ 15 "{WIN_SYS32}\\taskkill.exe" /f /im "{os.path.basename(me)}" >nul 2>&1',
+            f'"{WIN_SYS32}\\ping.exe" -n 8 127.0.0.1 >nul',
+            f'"{WIN_SYS32}\\taskkill.exe" /f /im "{os.path.basename(me)}" >nul 2>&1',
             f'"{WIN_SYS32}\\ping.exe" -n 2 127.0.0.1 >nul',
-            "goto wait",
             ":swap",
+            # move 可能还撞着杀毒扫描留下的句柄：最多试十次，每次隔一秒。
+            # 循环里只有 move 和 ping，仍然没有管道。
+            "for /l %%i in (1,1,10) do (",
+            f'  move /y "{me}" "{me}.old" >nul 2>&1',
+            f'  if not exist "{me}" goto swapped',
+            f'  "{WIN_SYS32}\\ping.exe" -n 2 127.0.0.1 >nul',
+            ")",
+            ":swapped",
             f'move /y "{setup_exe}" "{me}" >nul',
             f'del /f /q "{me}.old" >nul 2>&1',
             f'start "" "{me}"',
@@ -9190,7 +9190,17 @@ def _uninstall_script(paths):
 
 def _run_detached(argv):
     try:
-        flags = 0x00000008 | 0x00000200        # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+        # CREATE_NO_WINDOW，不是 DETACHED_PROCESS。
+        #
+        # DETACHED 的进程完全没有 console：它再拉起 console 程序（tasklist /
+        # findstr / ping）时，每个都会临时得到一个新 conhost，而 conhost 会把
+        # 父进程的管道句柄继承下来 —— 写端就一直有人按着。1.03.7 及以前的换装
+        # 批处理里 `tasklist | findstr` 就是这么卡死的：tasklist 退了，findstr
+        # 还在等一个永远不会关闭的 stdin，界面上是一个停在半路的命令行窗口。
+        #
+        # CREATE_NO_WINDOW 给整个进程树一个隐藏 console：照样看不见窗口，但
+        # console 语义是正常的 —— 子进程共享同一个 conhost，管道 EOF 能送达。
+        flags = 0x08000000 | 0x00000200        # CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
         subprocess.Popen(argv, creationflags=flags, close_fds=True,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True
