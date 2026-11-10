@@ -43,8 +43,8 @@ import zlib
 # 0. 常量与运行时开关
 # ---------------------------------------------------------------------------
 
-VERSION = "1.03.5"              # 护照里只存这个，纯数字
-DISPLAY_VERSION = "1.03.5-beta"  # 界面上给人看的：跟 Release tag 一致
+VERSION = "1.03.6"              # 护照里只存这个，纯数字
+DISPLAY_VERSION = "1.03.6-beta"  # 界面上给人看的：跟 Release tag 一致
 APP = "POJIA"                   # 护照里的 tool 字段，磁盘契约，别改
 DISPLAY_NAME = "破甲修改器"      # 只用于对外文案
 
@@ -5979,9 +5979,29 @@ def _kind_tag(kind, payload):
     return kind
 
 
+def _block_insertion_span(text, style):
+    """这个文件里有没有我们"纯插入"的那段注释块。有就是精确逆运算的凭据。"""
+    return find_blocks(text, *cblock_markers(style))
+
+
+def _settle_block_tail(text, path, tgt):
+    """块尾那一行换行是 cblock_put 加的分隔，剪完可能多出来一个。
+
+    原始文件到底有没有以换行结尾，文件本身已经说不清了，只能问注入前那份备份：
+    正文一致、只差行尾空白就用备份的形状；正文对不上（说明别人也往里写过）就
+    保留剪出来的结果 —— 宁可多一个空行，也不能把别人的内容抹掉。
+    """
+    if not backup_is_clean(path, tgt.bak_suffix):
+        return text
+    bak = read_strict(backup_path(path, tgt.bak_suffix))
+    if bak is None:
+        return text
+    return bak if bak.rstrip("\n") == text.rstrip("\n") else text
+
+
 def revert_one(tgt, path, kind_tag, was_created, root=None):
     kind, _sep, key = str(kind_tag).partition(":")
-    # 第二落点先清，放在一切早退之前：主文件有干净备份时本函数会在下一行直接返回，
+    # 第二落点先清，放在一切早退之前：主文件有干净备份时本函数会在下面直接返回，
     # 之前把这段放在 block 分支里，技能包永远不会被删掉。
     extra = getattr(tgt, "extra_reverts", None)
     if extra:
@@ -5994,12 +6014,37 @@ def revert_one(tgt, path, kind_tag, was_created, root=None):
                     os.remove(long_path(epath))
                 except OSError:
                     pass
+
+    text = read_strict(path)
+    # 纯插入型注入先按标记裁剪，不先看快照。
+    #
+    # 标记块是我们自己的、自描述的写入凭据：剪掉它只回滚我们写的那几行。快照不是——
+    # 它把"拍快照那一刻"的整份文件搬回来，于是快照之后别人写进同一文件的东西一起没。
+    # DSH 的 profiles/*/cordis.patch.yml 就是典型：用户自己、别的 preset 安装器、
+    # 会话守卫都往里写，一次 --revert 全被带回几个月前。
+    #
+    # 只有"我们换掉了内容"（整文件替换、字段注入、JS 字面量替换）才必须用快照，
+    # 那种情况重建不出原样，下面照旧走备份 -> 保险库。
+    if text is not None and kind in ("cblock", "jslit"):
+        style = "js" if kind == "jslit" else (key or "yaml")
+        if _block_insertion_span(text, style):
+            new = _settle_block_tail(cblock_strip(text, style), path, tgt)
+            _t, bom, eol = read_or_default(path)
+            if not new.strip():
+                if was_created or tgt.is_own_file(path):
+                    return remove_file(path)
+                return write_bytes_checked(path, encode_text("", bom, eol))
+            return write_bytes_checked(path, encode_text(new, bom, eol))
+        # cblock 只会插入，不会替换：块不在就是没留东西，快照这时候只会帮倒忙
+        # （把宿主后来更新过的文件搬回旧版）。jslit 还有"替换字面量"那支，得往下走。
+        if kind == "cblock":
+            return True
+
     if backup_is_clean(path, tgt.bak_suffix):
         return restore_backup(path, tgt.bak_suffix)
     vroot = tgt.vault_root()
     if vroot and vault_restore(vroot, path):
         return True
-    text = read_strict(path)
     if text is None:
         return False
     _t, bom, eol = read_or_default(path)
@@ -6023,9 +6068,10 @@ def revert_one(tgt, path, kind_tag, was_created, root=None):
     elif kind == "memory":
         new = mem_strip(text)
     elif kind == "cblock":
-        new = cblock_strip(text, key or "yaml")
+        # 走到这里说明块已经不在了（上面那段拆掉了），没有可撤的
+        return True
     elif kind == "jslit":
-        new = cblock_strip(text, "js") if has_mark(text) else text
+        return True
     else:
         new = strip_blocks(text)
     if not new.strip():
