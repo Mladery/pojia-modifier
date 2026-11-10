@@ -166,7 +166,7 @@ def seed(root):
         ("cline", "pojia-inject.md"), ("copilot", "copilot-instructions.md"),
         ("kiro", os.path.join("steering", "pojia-inject.md")),
         ("reasonix", "AGENTS.md"),
-        ("traecn", os.path.join("rules", "project_rules.md")),
+        ("traecn", os.path.join("user_rules", "user_notes.md")),
         ("qodercn", os.path.join("agents", "purge", "qodercn.md")),
     ]
     for key, rel in simple:

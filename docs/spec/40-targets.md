@@ -89,7 +89,7 @@
 | `copilot` | Copilot CLI | `~/.copilot` | `copilot-instructions.md` | 标记块 |
 | `kiro` | Kiro | `~/.kiro` | `steering/pojia-inject.md` | 标记块 |
 | `reasonix` | Reasonix | `%APPDATA%/reasonix` | `AGENTS.md` | 标记块 |
-| `traecn` | Trae CN | `~/.trae-cn` | `rules/project_rules.md` | 标记块 |
+| `traecn` | Trae CN | `~/.trae-cn` | `user_rules/pojia.md` | 标记块 |
 | `qodercn` | Qoder CN | `~/.qoder-cn` | `agents/purge/qodercn.md` | 标记块（frontmatter 在块之前） |
 
 ### 3.1 各目标的定位要点
@@ -107,7 +107,7 @@
 | `cline` | `CLINE_CONFIG_DIR` | 无 | 纯文件型，无进程可查 |
 | `kiro` | `KIRO_HOME` | `Kiro` | 底层模型是 Claude，专用段要按 Claude 口径写 |
 | `reasonix` | `REASONIX_HOME` / `REASONIX_STATE_HOME` | `Reasonix Studio.exe` / `reasonix` / `reasonix-studio-host.exe` | 主目录在 `%APPDATA%\reasonix`，`~\.reasonix` 只是锁目录；分层加载 `AGENTS.md` → 祖先链 → 项目 → `*.local.md` |
-| `traecn` | `TRAE_CN_HOME` | `Trae CN.exe` | 与 `trae` 分开认：`rules/` 与 `user_rules/` 两个目录都整目录加载，`alwaysApply` 是装载标记不是优先级 |
+| `traecn` | `TRAE_CN_HOME` | `Trae CN.exe` | 1.107.0 起全局层只读 `user_rules.md`（legacy）与 `user_rules/` 目录递归，不再读 `~/.trae-cn/rules/`；项目规则在 `<workspace>/.trae/rules/`。定位标记 `argv.json` 常驻（全新安装也有）；安装根与配置根不同位，进程反推重写为「进程命中 → 回默认配置根」 |
 | `qodercn` | `QODER_CONFIG_DIR` / `QODER_HOME` | `Qoder.exe` | 本地没有可替换的政策块（政策在服务端），靠 agent + skill 两层行为契约；`skills/purge/SKILL.md` 是主文件之外的附带落点，撤回时一并摘除 |
 
 ---

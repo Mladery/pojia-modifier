@@ -7252,6 +7252,16 @@ class ReasonixTarget(BlockTarget):
 
 
 class TraeCnTarget(BlockTarget):
+    """Trae CN：1.107.0 起全局规则不再读 ~/.trae-cn/rules/project_rules.md，
+    全局层只认两处 —— user_rules.md（legacy 单文件）和 user_rules/ 目录下的
+    任意 .md（递归最多 3 层）。项目规则在 <workspace>/.trae/rules/，不归本工具管。
+    落点选 user_rules/pojia.md（目录式，官方形态）。
+
+    定位：argv.json 在 ~/.trae-cn 常驻（全新安装、一份规则都没写过也有），
+    拿它当默认位置的标记；进程反推必须重写 —— 安装根
+    （AppData/Local/Programs/Trae CN）与配置根（~/.trae-cn）不在一条祖先链上，
+    基类沿目录往上找 locator_ok 对它永远空手。
+    """
     key = "traecn"
     name = "Trae CN"
     rel_dir = ".trae-cn"
@@ -7259,8 +7269,21 @@ class TraeCnTarget(BlockTarget):
     procs = ("Trae CN.exe", "TraeCode CN.exe", "trae-cn.exe")
     exe = "Trae CN.exe"
     dir_flag = "--traecn-dir"
-    markers = ("rules", "user_rules", "settings.json")
-    instr = os.path.join("rules", "project_rules.md")
+    markers = ("argv.json", "user_rules", "user_rules.md", "rules", "settings.json")
+    instr = os.path.join("user_rules", "pojia.md")
+
+    def from_process(self):
+        # 只借运行中的进程确认「CN 版在这台机器上活着」，落点直接回默认配置根。
+        names = tuple(self.procs) + ((self.exe,) if self.exe else ())
+        names = tuple(n for n in names if n)
+        if not names:
+            return ""
+        for pid, pname, _cmd in process_table():
+            if _name_match(pname, names):
+                d = self.default_root()
+                if d and os.path.isdir(d):
+                    return d
+        return ""
 
 
 class QoderCnTarget(BlockTarget):
@@ -7541,10 +7564,12 @@ def check_target(t, ctx, root, src):
         extra = []
         if os.path.isdir(long_path(ur)):
             for name in sorted(os.listdir(ur)):
-                if name.lower().endswith(".md"):
+                if name.lower().endswith(".md") and name.lower() != "pojia.md":
                     extra.append(name)
         add("ok" if extra else "info",
-            "user_rules 下另有 %d 份规则同时在生效" % len(extra), "、".join(extra[:4]))
+            "user_rules 下另有 %d 份用户规则同时在生效" % len(extra), "、".join(extra[:4]))
+        if os.path.isfile(long_path(os.path.join(root, "rules", "project_rules.md"))):
+            add("info", "旧落点 rules/project_rules.md 还在盘上（1.107 起全局层不读它，--revert 可清）", "")
         if os.path.isdir(long_path(os.path.join(home(), ".trae"))):
             add("info", "国际版 .trae 也在，本工具有独立的 trae 目标", "")
 
