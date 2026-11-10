@@ -368,15 +368,20 @@ Function DeleteSetup
   ${EndIf}
   FileWrite $1 "@echo off$\r$\n"
   FileWrite $1 "set TARGET=$EXEPATH$\r$\n"
-  FileWrite $1 "for /l %%i in (1,1,30) do ($\r$\n"
+  FileWrite $1 "for /l %%i in (1,1,60) do ($\r$\n"
   FileWrite $1 '  del /f /q "%TARGET%" >nul 2>&1$\r$\n'
   FileWrite $1 '  if not exist "%TARGET%" goto done$\r$\n'
-  FileWrite $1 "  ping -n 2 127.0.0.1 >nul$\r$\n"
+  ; ping 也带全路径：ExecShell 继承的环境不定，从 Git Bash 拉起来的链上
+  ; usr\bin 可能排在前头 —— 那边的 ping 不是 Windows 的 ping。
+  FileWrite $1 '  "$SYSDIR\ping.exe" -n 2 127.0.0.1 >nul$\r$\n'
   FileWrite $1 ")$\r$\n"
   FileWrite $1 ":done$\r$\n"
   FileWrite $1 'del /f /q "%~f0" >nul 2>&1$\r$\n'
   FileClose $1
-  ExecShell "" "$0" SW_HIDE
+  ; ExecShell 是四参语法：动作、文件、参数、显示方式。这里参数必须占一个空串，
+  ; 不然 SW_HIDE 落到参数位上，窗口照常弹出来 —— 用户看到一个黑窗卡在那儿删
+  ; setup，看着就是「命令行卡死」，1.03.6 及以前就是这么吓人的。
+  ExecShell "" "$0" "" SW_HIDE
 FunctionEnd
 
 Function .onInstSuccess

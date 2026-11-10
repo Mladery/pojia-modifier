@@ -468,6 +468,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(("启动失败：%s\n" % e).encode("utf-8"))
             return
         tail = []
+        saw_armed = False
         try:
             while True:
                 chunk = proc.stdout.readline()
@@ -475,8 +476,13 @@ class Handler(BaseHTTPRequestHandler):
                     break
                 self.wfile.write(chunk)
                 self.wfile.flush()
-                tail.append(chunk.decode("utf-8", "replace"))
+                line = chunk.decode("utf-8", "replace")
+                tail.append(line)
                 del tail[:-20]
+                # 滑窗只有 20 行，下载进度一多就可能把「已安排」挤出去。
+                # 退场判定单独累积，不依赖窗口还留着那行。
+                if "已安排" in line:
+                    saw_armed = True
         except (BrokenPipeError, ConnectionResetError):
             proc.kill()
         finally:
@@ -500,7 +506,7 @@ class Handler(BaseHTTPRequestHandler):
         # 这里先体面地走 —— 页面上的最后一行说明它会自己重开。
         # 两种换装都算：「已安排升级」（装过的，走安装器）和「已安排替换」
         # （绿色版，直接挪文件）。两条路都必须让这个进程先退场。
-        if action == "update" and code == 0 and "已安排" in "".join(tail):
+        if action == "update" and code == 0 and saw_armed:
             try:
                 self.wfile.write(
                     "\n程序即将退出，安装完成后会自动重新打开。\n".encode("utf-8"))
