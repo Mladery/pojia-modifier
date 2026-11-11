@@ -43,8 +43,8 @@ import zlib
 # 0. 常量与运行时开关
 # ---------------------------------------------------------------------------
 
-VERSION = "1.03.9"              # 护照里只存这个，纯数字
-DISPLAY_VERSION = "1.03.9-beta"  # 界面上给人看的：跟 Release tag 一致
+VERSION = "1.03"                # 护照里只存这个，纯数字
+DISPLAY_VERSION = "1.03-mod"    # 界面上给人看的：跟 Release tag 一致
 APP = "POJIA"                   # 护照里的 tool 字段，磁盘契约，别改
 DISPLAY_NAME = "破甲修改器"      # 只用于对外文案
 
