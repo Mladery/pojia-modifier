@@ -43,8 +43,8 @@ import zlib
 # 0. 常量与运行时开关
 # ---------------------------------------------------------------------------
 
-VERSION = "1.03.8"              # 护照里只存这个，纯数字
-DISPLAY_VERSION = "1.03.8-beta"  # 界面上给人看的：跟 Release tag 一致
+VERSION = "1.03.9"              # 护照里只存这个，纯数字
+DISPLAY_VERSION = "1.03.9-beta"  # 界面上给人看的：跟 Release tag 一致
 APP = "POJIA"                   # 护照里的 tool 字段，磁盘契约，别改
 DISPLAY_NAME = "破甲修改器"      # 只用于对外文案
 
@@ -3113,31 +3113,45 @@ def profile_dirs(config_root):
 
 
 def standard_preset_text(install_root):
-    """找官方 standard.patch.yml：先按已知路径找，再浅层 glob，最后进 app.asar 读。"""
-    for base in (os.path.join(install_root or "", "resources", "app.asar.unpacked"),
-                 os.path.join(install_root or "", "resources", "app"),
-                 install_root or ""):
-        for rel in STD_PRESET_REL:
-            text = read_strict(os.path.join(base, *rel.split("/")))
-            if text and text.strip():
+    """找官方 standard.patch.yml：先按已知路径找，再浅层 glob，最后进 app.asar 读。
+
+    macOS 的 .app 包资源在 Contents/Resources 下，比 Windows 多一层，所以两种
+    形态都试一遍：拼不出来就空手，调用方会退到内置模板。
+    """
+    roots = [install_root]
+    if not install_root and IS_MAC:
+        # install_root 空手时（mac 上 .app 在 /Applications、配置在 ~/.dsh，不在
+        # 一条祖先链），去 /Applications 里挨个试。只有真带 standard.patch.yml
+        # 的包才会命中，试错没有代价。
+        roots.extend(mac_app_candidates())
+    res_dirs = []
+    for r in roots:
+        res_dirs.append(os.path.join(r or "", "resources"))
+        res_dirs.append(os.path.join(r or "", "Contents", "Resources"))
+    for res in res_dirs:
+        for base in (os.path.join(res, "app.asar.unpacked"), os.path.join(res, "app"), res):
+            for rel in STD_PRESET_REL:
+                text = read_strict(os.path.join(base, *rel.split("/")))
+                if text and text.strip():
+                    return text
+    for res in res_dirs:
+        for base in (os.path.join(res, "app"), os.path.join(res, "app.asar.unpacked")):
+            for hit in _glob(base, "**/dsh-web-app/presets/standard.patch.yml")[:3]:
+                text = read_strict(hit)
+                if text and text.strip():
+                    return text
+    for res in res_dirs:
+        asar = os.path.join(res, "app.asar")
+        for rel in STD_PRESET_ASAR:
+            data = asar_read_file(asar, rel)
+            if not data:
+                continue
+            try:
+                text = data.decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+            if text.strip():
                 return text
-    for base in (os.path.join(install_root or "", "resources", "app"),
-                 os.path.join(install_root or "", "resources", "app.asar.unpacked")):
-        for hit in _glob(base, "**/dsh-web-app/presets/standard.patch.yml")[:3]:
-            text = read_strict(hit)
-            if text and text.strip():
-                return text
-    asar = os.path.join(install_root or "", "resources", "app.asar")
-    for rel in STD_PRESET_ASAR:
-        data = asar_read_file(asar, rel)
-        if not data:
-            continue
-        try:
-            text = data.decode("utf-8")
-        except UnicodeDecodeError:
-            continue
-        if text.strip():
-            return text
     return ""
 
 
@@ -5254,6 +5268,30 @@ class Target(object):
                 return False
         return self.is_valid(root)
 
+    def default_ok(self, root):
+        """默认配置目录的判据：目录在、里面不是空的，就算装了。
+
+        为什么不能用 is_valid：markers 是**强判据**，用来在深搜、进程反推时确认
+        「这个目录确实是那个客户端的」，防止把 bin / resources 认成安装根。默认
+        位置不一样 —— 那是 ~/.claude、~/.gemini 这种产品专属目录，名字本身就是
+        最强信号，目录存在说明客户端至少跑过一次。
+
+        早先这里也套了 is_valid，代价是「装了但还没写过那个具体文件」的机器全被
+        判成未安装。macOS 上尤其明显：~/.claude 里常年只有 projects/ 与
+        settings.json，没有 CLAUDE.md 也没有 skills，于是 claude、antigravity
+        一路全灭；而 markers 为空的 zcode、恰好有 config.toml 的 codex 反而是
+        唯二能认出来的 —— issue #2 报的就是这个。空目录仍然不认，那是 mkdir
+        出来的空壳，不是客户端。
+        """
+        if not root or not os.path.isdir(long_path(root)):
+            return False
+        if self.is_valid(root):
+            return True
+        try:
+            return bool(os.listdir(long_path(root)))
+        except OSError:
+            return False
+
     def vault_root(self):
         """备份仓库目录。默认没有仓库；只有会整体替换文件的目标才需要。"""
         return ""
@@ -5303,7 +5341,7 @@ class Target(object):
                 return v, "环境变量 %s" % env, tried
             tried.append("%s=%s" % (env, v))
         default = self.default_root()
-        if default and os.path.isdir(default) and self.is_valid(default):
+        if default and self.default_ok(default):
             return default, "默认位置", tried
         if default:
             tried.append(default)
@@ -6367,17 +6405,35 @@ class WorkBuddyTarget(BlockTarget):
         out = []
         for sub in ("WorkBuddy", "WorkBuddyAI"):
             out.append(os.path.join(localappdata(), "Programs", sub))
+        if IS_MAC:
+            # macOS 上桌面端就是个 .app 包，没有 AppData/Programs 这一层。
+            # 国内版与国际版按包名分，和 Windows 的 exe 名一一对应。
+            for folder in ("/Applications", os.path.join(home(), "Applications")):
+                for sub in ("WorkBuddy.app", "WorkBuddyAI.app"):
+                    out.append(os.path.join(folder, sub))
         return out
 
-    def template_marker(self):
-        return os.path.join("resources", "app.asar.unpacked", "resources",
+    def resource_root(self, root):
+        """安装根里 resources 那一层。macOS 的 .app 包在 Contents/Resources 下。"""
+        for parts in (("Contents", "Resources"), ("resources",)):
+            p = os.path.join(root, *parts)
+            if os.path.isdir(long_path(p)):
+                return p
+        return os.path.join(root, "resources")
+
+    def template_marker(self, root=""):
+        base = self.resource_root(root) if root else "resources"
+        return os.path.join(base, "app.asar.unpacked", "resources",
                             "templates", "workbuddy-prompt.tpl")
 
     def is_install(self, root):
-        return os.path.isfile(long_path(os.path.join(root, self.template_marker())))
+        return os.path.isfile(long_path(self.template_marker(root)))
 
     def is_intl(self, root):
-        return os.path.isfile(long_path(os.path.join(root, "WorkBuddyAI.exe")))
+        if os.path.isfile(long_path(os.path.join(root, "WorkBuddyAI.exe"))):
+            return True
+        base = os.path.basename(os.path.normpath(root or "")).lower()
+        return base in ("workbuddyai.app", "workbuddyai")
 
     def resolve_install(self, explicit=""):
         tried = []
@@ -6457,7 +6513,7 @@ class WorkBuddyTarget(BlockTarget):
         return install, src, tried
 
     def templates(self, root):
-        base = os.path.join(root, "resources", "app.asar.unpacked", "resources")
+        base = os.path.join(self.resource_root(root), "app.asar.unpacked", "resources")
         out = []
         if not os.path.isdir(base):
             return out
@@ -6476,9 +6532,10 @@ class WorkBuddyTarget(BlockTarget):
         模板只是出厂的默认值，真正被每轮读走的是这一份。只改模板等于
         写完没人读：product.json 里留着的还是上一代的政策与旧口令。
         """
-        for rel in (("resources", "app.asar.unpacked", "cli", "product.json"),
-                    ("resources", "app", "cli", "product.json")):
-            p = os.path.join(root, *rel)
+        res = self.resource_root(root)
+        for rel in (("app.asar.unpacked", "cli", "product.json"),
+                    ("app", "cli", "product.json")):
+            p = os.path.join(res, *rel)
             if os.path.isfile(long_path(p)):
                 return p
         return ""
@@ -6720,9 +6777,30 @@ class DshTarget(Target):
     def is_install(self, root):
         if not root or not os.path.isdir(root):
             return False
-        return (os.path.isfile(long_path(os.path.join(root, "resources", "app.asar")))
+        if (os.path.isfile(long_path(os.path.join(root, "resources", "app.asar")))
                 or os.path.isdir(long_path(os.path.join(root, "resources", "app")))
-                or os.path.isdir(long_path(os.path.join(root, "node_modules", "@deepseek-ai"))))
+                or os.path.isdir(long_path(os.path.join(root, "node_modules", "@deepseek-ai")))):
+            return True
+        # macOS 的 .app 包：资源在 Contents/Resources 下，比 Windows 多一层
+        return (os.path.isfile(long_path(os.path.join(root, "Contents", "Resources", "app.asar")))
+                or os.path.isdir(long_path(os.path.join(root, "Contents", "Resources", "app"))))
+
+    def resource_base(self, root):
+        """安装根里真正放 js / yml 的那层目录；没有就空串。
+
+        Windows / Linux 的包是 <root>/resources/app，macOS 是
+        <root>/Contents/Resources/app。抽出来是因为 plan 与 is_install 都要认
+        这两套，写两遍迟早对不上。
+        """
+        if not root:
+            return ""
+        for parts in (("resources", "app"), ("Contents", "Resources", "app"),
+                      ("resources", "app.asar.unpacked"),
+                      ("Contents", "Resources", "app.asar.unpacked")):
+            p = os.path.join(root, *parts)
+            if os.path.isdir(long_path(p)):
+                return p
+        return ""
 
     def is_valid(self, root):
         return self.is_install(root)
@@ -6752,14 +6830,17 @@ class DshTarget(Target):
                         cands.append(base)
                         break
                     base = os.path.dirname(base)
-        for letter in "CDEFGHIJKLMNOPQRSTUVWXYZ":
-            root = letter + ":\\"
-            if not os.path.isdir(root):
-                continue
-            cands.append(os.path.join(root, "Users", os.path.basename(home()),
-                                      "AppData", "Local", "Programs", "DSH"))
-            cands.append(os.path.join(root, "Program Files", "DSH"))
-            cands.append(os.path.join(root, "DSH"))
+        if IS_WIN:
+            # 盘符全扫只在 Windows 上有意义；mac / Linux 上 "C:\\" 会被当成相对
+            # 路径，白跑二十几轮 isdir，还可能在当前目录下拼出奇怪的候选。
+            for letter in "CDEFGHIJKLMNOPQRSTUVWXYZ":
+                root = letter + ":\\"
+                if not os.path.isdir(root):
+                    continue
+                cands.append(os.path.join(root, "Users", os.path.basename(home()),
+                                          "AppData", "Local", "Programs", "DSH"))
+                cands.append(os.path.join(root, "Program Files", "DSH"))
+                cands.append(os.path.join(root, "DSH"))
         for c in cands:
             if self.is_install(c):
                 return c, "安装根", tried
@@ -6770,10 +6851,16 @@ class DshTarget(Target):
                                   "Program Files\\DSH", "DSH"], self.is_install, budget=8.0)
             if got:
                 return got, "深度遍历", tried
-        for exe in ("DSH.exe", "DeepSeek Harness.exe"):
+        for exe in ("DSH.exe", "DeepSeek Harness.exe", "DSH Desktop"):
             got = everything_walk(exe, self.is_install)
             if got:
                 return got, "Everything 检索", tried
+        # 安装根找不到，配置根还在也照样能干活：preset 模式、会话守卫、profile
+        # 里的 cordis.patch.yml 全落在配置根，一个字节都不需要安装目录。macOS 上
+        # 这是常态 —— .app 在 /Applications，配置在 ~/.dsh，两者不在一条祖先链上，
+        # 上面每一条源都空手，最后只能靠这一条。
+        if profile_dirs(self.config_root()):
+            return self.config_root(), "配置目录（无安装根）", tried
         return "", "", tried
 
     def profile_dir(self):
@@ -6789,11 +6876,10 @@ class DshTarget(Target):
 
     def plan(self, ctx, root):
         out = []
-        app_dir = os.path.join(root, "resources", "app")
-        if os.path.isdir(app_dir):
-            base = app_dir
-        else:
-            base = os.path.join(root, "resources", "app.asar.unpacked")
+        # 资源目录可能在 <root>/resources/app（Windows / Linux），也可能在
+        # <root>/Contents/Resources/app（macOS 的 .app 包）。root 万一是配置根
+        # （安装根没找到那种情况），这里拿不到 base，下面只出 profile 那一条。
+        base = self.resource_base(root)
         patterns = [
             "dsh-agent-instructions/lib/*.js",
             "dsh-agent-instructions/**/*.js",
@@ -6804,7 +6890,7 @@ class DshTarget(Target):
             "**/node_modules/@deepseek-ai/dsh-agent-instructions/lib/*.js",
         ]
         seen = set()
-        for pat in patterns:
+        for pat in patterns if base else ():
             for p in _glob(base, pat):
                 if p in seen:
                     continue
@@ -6818,7 +6904,7 @@ class DshTarget(Target):
             "*/node_modules/@deepseek-ai/*/presets/*.patch.yml",
             "**/node_modules/@deepseek-ai/*/presets/*.patch.yml",
         ]
-        for pat in ypatterns:
+        for pat in ypatterns if base else ():
             for p in _glob(base, pat):
                 if p in seen:
                     continue
@@ -7244,6 +7330,17 @@ class ReasonixTarget(BlockTarget):
     dir_flag = "--reasonix-dir"
     markers = ("AGENTS.md", "config.toml", "sessions")
     instr = "AGENTS.md"
+
+    def default_root(self):
+        """Windows 在 %APPDATA%\\reasonix；macOS / Linux 在 ~/.reasonix。
+
+        旧版在 resolve_home 里就有这个分支，搬到新版时 rel_dir 写成了 Windows
+        形态的拼接，非 Windows 上 default_root 落成 <home>/AppData/Roaming/reasonix
+        —— 那个目录永远不会存在，于是 mac 上 Reasonix 恒为「未安装」。
+        """
+        if IS_WIN:
+            return os.path.join(appdata(), "reasonix")
+        return os.path.join(home(), ".reasonix")
 
     def is_valid(self, root):
         if not root or not os.path.isdir(long_path(root)):

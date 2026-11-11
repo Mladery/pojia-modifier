@@ -46,13 +46,24 @@
 | 15 | `cline` | Cline | `~\Documents\Cline\Rules` | `CLINE_CONFIG_DIR` |
 | 16 | `copilot` | Copilot CLI | `~\.copilot` | `COPILOT_HOME` |
 | 17 | `kiro` | Kiro | `~\.kiro` | `KIRO_HOME` |
-| 18 | `reasonix` | Reasonix | `%APPDATA%\reasonix` | `REASONIX_HOME` / `REASONIX_STATE_HOME` |
+| 18 | `reasonix` | Reasonix | `%APPDATA%\reasonix`（macOS / Linux 为 `~\.reasonix`） | `REASONIX_HOME` / `REASONIX_STATE_HOME` |
 | 19 | `traecn` | Trae CN | `~\.trae-cn` | `TRAE_CN_HOME` |
 | 20 | `qodercn` | Qoder CN | `~\.qoder-cn` | `QODER_CONFIG_DIR` / `QODER_HOME` |
 
 ### 2.1 每个目标的"标志物"
 
-一个候选目录只有在**同时满足**"目录存在"与"含下列任一标志物"时才算命中。只判断目录存在不够——用户可能建过同名空目录。
+标志物有**两种用法**，判据不一样，混用会两头出错：
+
+| 场景 | 判据 | 理由 |
+|---|---|---|
+| 默认位置（`~\.claude` 这种产品专属目录） | 目录存在 且 里面非空 | 目录名本身就是最强信号；只要客户端跑过一次，里面必然有东西 |
+| 兜底候选（深搜 / 进程反推 / 注册表 / 快捷方式） | 目录存在 且 含标志物 | 那些源给的是任意目录，必须用强判据确认它是安装根而不是 `bin\` |
+
+早先两处都套了强判据，代价是"装了但还没写过那个具体文件"的机器全被判成未安装。
+macOS 上尤其明显：`~/.claude` 里常年只有 `projects/`、`settings.json`，既没有
+`CLAUDE.md` 也没有 `skills/`，于是 claude、antigravity 一路全灭；而标志物为空的
+`zcode`、恰好有 `config.toml` 的 `codex` 反而是唯二能认出来的（issue #2）。
+空目录仍然不认——那是 `mkdir` 出来的空壳。
 
 | key | 标志物（相对配置目录） |
 |---|---|
@@ -91,9 +102,21 @@ WorkBuddy 是"安装根 + 数据根"双根结构，两个都要定位，缺一�
 ```
 %LOCALAPPDATA%\Programs\WorkBuddy
 %LOCALAPPDATA%\Programs\WorkBuddyAI
+/Applications\WorkBuddy.app            （macOS）
+/Applications\WorkBuddyAI.app          （macOS）
+~\Applications\WorkBuddy.app           （macOS，用户级安装）
+~\Applications\WorkBuddyAI.app         （macOS）
 ```
 
-区分两个版本靠一个文件：安装根里**存在** `WorkBuddyAI.exe` → 属于国际版（`wbintl`）；**不存在** → 属于国内版（`wb`）。这条判据必须双向生效，否则两个目标会互相抢同一个目录。
+macOS 上 `resources\` 这层在包的 `Contents\Resources\` 下，标志物路径随之变成：
+
+```
+<安装根>\Contents\Resources\app.asar.unpacked\resources\templates\workbuddy-prompt.tpl
+```
+
+区分两个版本靠一个文件：安装根里**存在** `WorkBuddyAI.exe`（Windows）或包名是
+`WorkBuddyAI.app`（macOS）→ 属于国际版（`wbintl`）；否则属于国内版（`wb`）。这条
+判据必须双向生效，否则两个目标会互相抢同一个目录。
 
 **数据根**：
 
@@ -118,10 +141,21 @@ DSH 没有"一个配置文件"的概念，它的落点是 npm 包树里的 JS �
 <手动记住的>
 <上次发现的>
 <运行中 DSH 进程的镜像路径上溯>
-<盘符>\Users\<用户名>\AppData\Local\Programs\DSH
-<盘符>\Program Files\DSH
-<盘符>\DSH
+<盘符>\Users\<用户名>\AppData\Local\Programs\DSH      （仅 Windows）
+<盘符>\Program Files\DSH                               （仅 Windows）
+<盘符>\DSH                                             （仅 Windows）
+<配置根>（profile 里有 cordis.patch.yml 时）
 ```
+
+最后一条是给 macOS 用的：`.app` 装在 `/Applications`，配置在 `~/.dsh`，两者不在
+一条祖先链上，上面每一条源都空手。而 preset 模式、会话守卫、profile 里的
+`cordis.patch.yml` 全落在配置根，一个字节都不需要安装目录——所以只要
+`~/.dsh/profiles/*/cordis.patch.yml` 在，就当配置根可用（来源记作"配置目录（无安装根）"）。
+此时 `plan` 拿不到资源目录，只出 profile 那一条。
+
+macOS 的 `.app` 包内资源在 `Contents/Resources/` 下，标志物是
+`Contents/Resources/app.asar`（或该目录下的 `app/`），比 Windows 多一层。
+`~/.dsh` 里没有 `profiles/*/cordis.patch.yml` 的空壳不算数。
 
 ---
 
