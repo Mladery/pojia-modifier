@@ -357,6 +357,23 @@ def long_path(path):
     return "\\\\?\\" + p
 
 
+def resource_dir_of(root):
+    r"""安装根里 resources 那一层。
+
+    Windows / Linux：<root>\resources
+    macOS 的 .app 包：<root>\Contents\Resources    （多一层 Contents）
+
+    返回的是「应该在哪」，不保证存在 —— 调用方自己 isdir 判。之前这条规则在
+    WorkBuddy、DSH 的解包、asar 诊断各写了一遍，mac 上三处全错；现在只有这里
+    一份，加目标不会再漏。
+    """
+    for parts in (("Contents", "Resources"), ("resources",)):
+        p = os.path.join(root or "", *parts)
+        if os.path.isdir(long_path(p)):
+            return p
+    return os.path.join(root or "", "resources")
+
+
 def detect_eol(text):
     """只看前 400 字符：多数派胜出，都没有就 LF。"""
     head = text[:400]
@@ -4582,7 +4599,7 @@ def wb_js_files(root):
     key = norm(root or "")
     if key in _WB_JS_CACHE:
         return list(_WB_JS_CACHE[key])
-    base = os.path.join(root or "", "resources", "app.asar.unpacked")
+    base = os.path.join(resource_dir_of(root), "app.asar.unpacked")
     out = []
     if not base or not os.path.isdir(long_path(base)):
         return out
@@ -6415,11 +6432,7 @@ class WorkBuddyTarget(BlockTarget):
 
     def resource_root(self, root):
         """安装根里 resources 那一层。macOS 的 .app 包在 Contents/Resources 下。"""
-        for parts in (("Contents", "Resources"), ("resources",)):
-            p = os.path.join(root, *parts)
-            if os.path.isdir(long_path(p)):
-                return p
-        return os.path.join(root, "resources")
+        return resource_dir_of(root)
 
     def template_marker(self, root=""):
         base = self.resource_root(root) if root else "resources"
@@ -7276,7 +7289,7 @@ def unpack_asar(asar_path, out_dir):
 
 def ensure_unpacked(install_root):
     """app.asar 没更新过就复用，不重复解包。"""
-    resources = os.path.join(install_root, "resources")
+    resources = resource_dir_of(install_root)
     asar = os.path.join(resources, "app.asar")
     out = os.path.join(resources, "app.asar.unpacked")
     if not os.path.isfile(long_path(asar)):
@@ -7641,10 +7654,11 @@ def check_target(t, ctx, root, src):
         add("ok" if injected else "info", "模板 %d 份，其中 %d 份已注入" % (len(tpls), injected), "")
 
     if t.key == "dsh":
-        asar = os.path.join(root, "resources", "app.asar")
+        res = resource_dir_of(root)
+        asar = os.path.join(res, "app.asar")
         add("ok" if os.path.isfile(long_path(asar)) else "info",
             "app.asar：%s" % ("存在" if os.path.isfile(long_path(asar)) else "不存在"), "")
-        fused = os.path.join(root, "resources", "fuses.json")
+        fused = os.path.join(res, "fuses.json")
         if os.path.isfile(long_path(fused)):
             add("info", "检测到 fuses.json（Electron 保险丝）", "")
 
